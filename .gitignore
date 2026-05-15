@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Xcode — per-user state and caches
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+
+# Swift Package Manager (in case SwiftPM gets added later)
+.swiftpm/
+.build/
+
+# Release artifacts
+build/

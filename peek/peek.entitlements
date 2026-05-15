@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Sandbox: required for Mac App Store distribution, accepted by
+	     Gatekeeper for direct distribution. Peek does its work entirely
+	     through ScreenCaptureKit and a loopback HTTP listener, so nothing
+	     reaches outside the sandbox container. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Local MCP server listens on 127.0.0.1 so AI agents can request
+	     window captures. Bearer-token auth required on every request. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>
