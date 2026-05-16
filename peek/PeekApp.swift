@@ -20,6 +20,12 @@ struct PeekApp: App {
             MenuBarLabel(menu: menu)
         }
         .menuBarExtraStyle(.menu)
+
+        Window("About Peek", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 }
 
@@ -121,8 +127,8 @@ final class MenuModel: ObservableObject {
     }
 
     func testMCPConnection() async {
-        guard let token = mcpToken else {
-            status = "Test failed: no token"
+        guard let token = mcpToken, let port = mcpPort else {
+            status = "Test failed: no token or port"
             return
         }
         let body = Data(#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#.utf8)
@@ -130,6 +136,7 @@ final class MenuModel: ObservableObject {
             method: "POST",
             path: "/",
             headers: [
+                "host": "127.0.0.1:\(port)",
                 "authorization": "Bearer \(token)",
                 "content-type": "application/json",
             ],
@@ -197,6 +204,7 @@ final class MenuModel: ObservableObject {
 
 private struct MenuContents: View {
     @ObservedObject var menu: MenuModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -206,13 +214,15 @@ private struct MenuContents: View {
                     menu.requestPermission()
                 }
                 Text("After granting, quit and relaunch Peek.")
-            } else if menu.apps.isEmpty {
-                Text(menu.isRefreshing ? "Loading…" : "No captureable windows")
             } else {
-                Section("Copy window to clipboard") {
-                    ForEach(menu.apps) { entry in
-                        Button(entry.name) {
-                            Task { await menu.capture(entry) }
+                Menu("Capture window to clipboard") {
+                    if menu.apps.isEmpty {
+                        Text(menu.isRefreshing ? "Loading…" : "No captureable windows")
+                    } else {
+                        ForEach(menu.apps) { entry in
+                            Button(entry.name) {
+                                Task { await menu.capture(entry) }
+                            }
                         }
                     }
                 }
@@ -248,6 +258,13 @@ private struct MenuContents: View {
 
             Button("Refresh") {
                 Task { await menu.refresh() }
+            }
+
+            Divider()
+
+            Button("About Peek") {
+                openWindow(id: "about")
+                NSApp.activate(ignoringOtherApps: true)
             }
 
             Button("Quit Peek") { NSApplication.shared.terminate(nil) }

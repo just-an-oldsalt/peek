@@ -16,6 +16,7 @@ Status as of 2026-05-15. **MVP shipped** — agent path works end-to-end (verifi
 | 8 | ▢ pending | Settings window |
 | 9 | ▢ pending | End-to-end smoke test with Claude Desktop |
 | 10 | ▢ pending | Claude Desktop support via stdio bridge |
+| 11 | ▢ pending | Display enumeration + per-monitor capture |
 
 ## Build order
 
@@ -175,6 +176,31 @@ The agent path otherwise works end-to-end (verified via curl from Claude Code), 
 **Current state:** the bare-URL snippet from `Copy Claude Desktop config` works with Claude Code and is what Peek ships in v0. Claude Desktop users can paste it but will see the warning popup until #10 lands.
 
 **Blocked by:** #5 (done). **Should sequence after:** #6.
+
+### #11 Display enumeration + per-monitor capture
+
+**Why:** Today peek's surface is window-only. Users with multi-monitor setups want to say "what's on my Dell display" or "have a look at my laptop screen" — the agent should be able to address displays by their human-recognizable names, not just window IDs. Also unlocks "what's on my other screen right now?" check-in flows for the remote-tools-while-away scenario.
+
+**Approach:**
+
+- Extend `WindowCapture` (rename to `Capture`?) with display-side equivalents:
+  - `listDisplays()` → `[DisplayInfo]` from `SCShareableContent.current.displays`.
+  - `captureDisplay(id: CGDirectDisplayID)` → PNG via `SCContentFilter(display:excludingWindows:)`.
+- `DisplayInfo` should carry `id`, `frame`, `width`, `height`, `isMain`, and crucially `name` — pull from `NSScreen.localizedName` after correlating by `CGDirectDisplayID` (`NSScreen.deviceDescription[NSScreenNumber]`). That gives the LLM strings like "Built-in Retina Display", "DELL U2720Q", "LG UltraFine 27" — names users actually recognize.
+- New MCP tools, mirroring the window ones:
+  - `list_displays` → `[{id, name, frame, is_main}, …]`.
+  - `capture_display` → `{ id?: number, name?: string }`. Either-or args; `name` does a case-insensitive substring match against `localizedName`. Reject ambiguous matches with a clear error so the agent can re-ask or fall back to `id`.
+
+**Trust gates:**
+- Whole-display capture has a wider privacy surface than per-window — a Slack notification, a 1Password panel, an email preview can sit on any display. The MDM key `allowScreenCapture` (already in DESIGN.md) defaults to **false** for exactly this reason. `list_displays` should still work when `allowScreenCapture` is false (it leaks display geometry, not pixels); `capture_display` must return a policy-denied error.
+- Per-display approval cache (sibling to #6's per-app one). First `capture_display` of a given display id pops Allow / Deny / Always-Allow. Trust decisions live in user defaults keyed by display vendor+model (so an external monitor unplugged and replugged isn't re-prompted) — though `CGDirectDisplayID` reuse across reboots is unreliable, so key by name+EDID hash if `IODisplayCreateInfoDictionary` cooperates within the sandbox; fall back to display name otherwise.
+
+**Open questions:**
+- Does `IODisplayCreateInfoDictionary` work under App Sandbox without an extra entitlement? Need to verify — if not, we lean entirely on `NSScreen.localizedName` (which is sandbox-safe). For MVP that's probably fine.
+- Should `capture_window` opportunistically capture the display when the requested window ID is ambiguous (e.g. multiple Calculator windows on different monitors)? Probably not — explicit per-tool, explicit args.
+- Headless / closed-lid behaviour: the built-in display may be present in `SCShareableContent.displays` but invisible. Surface `isActive` if SCK provides it (it does, via `SCDisplay.frame.size`-vs-`mainDisplayID` heuristics).
+
+**Blocked by:** #6 (per-app approval cache informs the per-display variant). Could land independently if the MVP gate is "respect `allowScreenCapture` MDM key + on-by-default approval prompt for any display capture" without the broader per-display memory.
 
 ## Decision log
 
