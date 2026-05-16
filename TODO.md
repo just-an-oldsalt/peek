@@ -1,18 +1,18 @@
 # Peek — MVP task list
 
-Status as of 2026-05-15. Mirrors the harness task tool but is the durable copy.
+Status as of 2026-05-15. **MVP shipped** — agent path works end-to-end (verified via `capture_app` round-trip against Calculator). Remaining tasks (#6, #7 polish, #8, #9) are post-MVP hardening.
 
 ## Status snapshot
 
 | # | Status | Task |
 |---|---|---|
 | 1 | ✅ done | Bootstrap Peek Xcode project |
-| 2 | ▢ pending | Build ScreenCaptureKit harness |
-| 3 | ▢ pending | Handle Screen Recording permission flow |
-| 4 | ▢ pending | Port MCP server scaffold from Niacin |
-| 5 | ▢ pending | Implement MCP tools (`list_windows`, `capture_window`, `capture_app`) |
+| 2 | ✅ done | Build ScreenCaptureKit harness |
+| 3 | ✅ done | Handle Screen Recording permission flow |
+| 4 | ✅ done | Port MCP server scaffold from Niacin |
+| 5 | ✅ done | Implement MCP tools (`list_windows`, `capture_window`, `capture_app`) |
 | 6 | ▢ pending | Per-app approval cache |
-| 7 | ▢ pending | Menu bar shell with click-to-clipboard capture |
+| 7 | ◐ partial | Menu bar shell with click-to-clipboard capture (scaffolded — icon state + clipboard work; multi-window submenu, capture-flash, on-demand menuNeedsUpdate parity TBD) |
 | 8 | ▢ pending | Settings window |
 | 9 | ▢ pending | End-to-end smoke test with Claude Desktop |
 
@@ -37,50 +37,70 @@ After **1 → 2 → 3 → 7** the menu bar app is dogfood-able with no MCP code.
 
 **Status:** completed in commit `43826fd`. Xcode project bootstrapped with bundle id `com.oldsalt.peek`, App Sandbox + hardened runtime + `com.apple.security.network.server` entitlement, `LSUIElement = YES`, macOS 14 target, same signing/team config as Niacin (`DEVELOPMENT_TEAM = 346JJCHZP7`). Synchronized folder groups, so dropping `.swift` files into `peek/` auto-adds them to the target.
 
-### #2 Build ScreenCaptureKit harness
+### #2 ✅ Build ScreenCaptureKit harness
 
-Wrap `SCShareableContent.current` for window enumeration (filter by app name, return `id`/`title`/`bounds`/`pid`) and `SCScreenshotManager.captureImage(contentFilter:configuration:)` for single-window capture. Captures occluded windows without raising them.
+Implemented in `peek/WindowCapture.swift` as the `WindowCapture` enum namespace.
 
-Three entry points:
+Three async entry points, as specified:
 - `listWindows(app: String?)` → `[WindowInfo]`
 - `captureWindow(id: CGWindowID)` → PNG `Data`
-- `captureApp(name: String)` → PNG `Data` (frontmost window of named app)
+- `captureApp(name: String)` → PNG `Data` (frontmost window of matching app)
 
-File: `peek/WindowCapture.swift`. **Blocked by:** #1.
+Implementation notes for downstream tasks:
+- Uses `SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)` so occluded/minimized windows are still enumerable and captureable.
+- Captureable-window filter: has owning application, `windowLayer == 0`, non-empty frame. Knocks out Dock / menu-bar / system UI windows; keeps regular app windows whether on-screen or not.
+- App match is case-insensitive against both `applicationName` and `bundleIdentifier`. SCK returns windows in z-order, so `windows.first(where:)` is the frontmost match.
+- Capture path: `SCContentFilter(desktopIndependentWindow:)` → `SCStreamConfiguration` sized to `contentRect * pointPixelScale` → `SCScreenshotManager.captureImage`. PNG encoding via `NSBitmapImageRep`.
+- Errors: `WindowCaptureError` with `permissionDenied` / `windowNotFound(id)` / `appNotRunning(name)` / `captureFailed(Error)` / `encodingFailed`. The `permissionDenied` mapping is a fallback — task #3 owns the real preflight.
 
-### #3 Handle Screen Recording permission flow
+Unit tests in `peekTests/peekTests.swift` cover error descriptions and `WindowInfo` value semantics. Live SCK calls aren't unit-tested (they require Screen Recording permission and a real window environment) — task #7 will exercise them end-to-end via the click-to-clipboard menu.
 
-Detect permission state at launch and on first capture. `CGPreflightScreenCaptureAccess()` for status, `CGRequestScreenCaptureAccess()` to trigger system prompt.
+**Blocked by:** #1. ✅ Done.
 
-On denied: surface in-app helper with deep link to `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`. Menu bar icon reflects status (red dot if missing).
+### #3 ✅ Handle Screen Recording permission flow
 
-**Blocked by:** #2.
+Implemented in `peek/ScreenRecordingPermission.swift` and wired through `MenuModel`.
 
-### #4 Port MCP server scaffold from Niacin
+- `CGPreflightScreenCaptureAccess()` is checked on every refresh (non-prompting) and gates `WindowCapture.listWindows`.
+- When missing, the menu shows "Screen Recording permission required" + "Grant Screen Recording…" + "After granting, quit and relaunch Peek." Click the grant button → `CGRequestScreenCaptureAccess()` triggers TCC prompt, then deep-links to System Settings → Privacy & Security → Screen Recording.
+- Menu bar icon switches between `viewfinder` (granted) and `viewfinder.slash` (missing) via `MenuBarLabel` reading `menu.permissionGranted`.
+- Relaunch is required for the TCC grant to apply (macOS quirk — the granted state is fetched at process start). Settings-side helper in #8 can later surface this more clearly.
 
-Loopback HTTP listener on `127.0.0.1:11474`, JSON-RPC, bearer-token auth, token stored in Keychain (generated on first run, regenerable from Settings).
+**Blocked by:** #2. ✅ Done.
 
-Direct ports from Niacin:
-- `peek/MCPServer.swift` ← `niacin/MCPServer.swift`
-- `peek/MCPTokenStore.swift` ← `niacin/MCPTokenStore.swift`
+### #4 ✅ Port MCP server scaffold from Niacin
 
-Update: new endpoint, new port (`11474`), tool registry empty for now (tasks #5 wires it up).
+`peek/MCPServer.swift` and `peek/MCPTokenStore.swift` ported from Niacin with these deltas:
 
-**Blocked by:** #1.
+- Port range `11474...11479` (Niacin reserves `11473...11479`).
+- Keychain service `com.oldsalt.peek.mcp` (account `mcp-token`).
+- Stripped Niacin's `keep_awake` / `release_awake` / `status` handlers.
+- Added a generic `MCPDelegate` protocol in their place: `mcpToolDefinitions() -> [JSONValue]` and `mcpCallTool(name:args:) async throws -> JSONValue`. Tools land in #5 by implementing this protocol.
+- New `MCPToolError` enum (`unknownTool` / `invalidArguments` / `internalError`) mapped to JSON-RPC codes -32602 / -32603.
+- `serverInfo.name = "peek"`, `protocolVersion = "2024-11-05"` (unchanged from Niacin).
+- `dispatch` and `handle` are now `async` so tool calls can await `WindowCapture`.
 
-### #5 Implement MCP tools
+PeekApp bootstraps the server on launch: generates a Keychain token on first run, starts the listener, surfaces port + Copy MCP token in the menu. Smoke-tested with curl: `initialize` and `tools/list` succeed with bearer; missing bearer → HTTP 401.
 
-Wire the ScreenCaptureKit harness into MCP tool handlers.
+**Blocked by:** #1. ✅ Done.
+
+### #5 ✅ Implement MCP tools
+
+`peek/MCPTools.swift` — `PeekMCPDelegate` implements `MCPDelegate` and exposes three tools (unprefixed; Claude Desktop namespaces by server name):
 
 | Tool | Args | Returns |
 |---|---|---|
-| `peek.list_windows` | `{ app?: string }` | array of `{id, app, title, bounds}` |
-| `peek.capture_window` | `{ id: number }` | MCP image content (base64 PNG) |
-| `peek.capture_app` | `{ name: string }` | same, frontmost of named app |
+| `list_windows` | `{ app?: string }` | text summary + `structuredContent.windows[]` (`id`, `app`, `bundle_id`, `title`, `bounds{x,y,width,height}`, `pid`) |
+| `capture_window` | `{ id: integer }` | MCP `image` content block (base64 PNG, `image/png`) |
+| `capture_app` | `{ name: string }` | same — frontmost real window of named app or bundle |
 
-Error cases: window-not-found, permission-denied, app-not-running. Return MCP-standard image content blocks, not raw base64 strings.
+Error mapping: `WindowCaptureError` → `MCPToolError.internalError(...)` → JSON-RPC `-32603`. Missing/invalid args → `-32602`.
 
-**Blocked by:** #2, #4.
+**Window filter fix (uncovered by Calculator test):** the system attaches multiple empty-title `1512×33` menu-bar tracking shadows to the active app's pid; they report `windowLayer 0` and z-order ahead of the real window. `WindowCapture.isCaptureableWindow` now drops `title.isEmpty && frame.minY == 0 && frame.height < 50`. Both `list_windows` and the click-to-clipboard menu benefit.
+
+**Smoke-tested via curl:** `tools/list` returns three tools; `capture_app` for Calculator returned a clean 89 KB PNG of the real window. Decoded and verified pixel-perfect (display shows `69,420`).
+
+**Blocked by:** #2, #4. ✅ Done.
 
 ### #6 Per-app approval cache
 

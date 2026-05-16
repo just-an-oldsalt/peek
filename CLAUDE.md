@@ -1,4 +1,8 @@
-# Peek — agent onboarding
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Peek — agent onboarding
 
 This is the source-of-truth doc for picking up Peek work in any session.
 
@@ -8,20 +12,43 @@ This is the source-of-truth doc for picking up Peek work in any session.
 
 Sibling to **Niacin** (`~/Documents/GIT/niacin`). Same architectural shape, different OS primitive (ScreenCaptureKit instead of `IOPMAssertion`).
 
-## Status — 2026-05-15
+## Status — 2026-05-15: MVP shipped
 
-- **Task #1 complete:** Xcode project bootstrapped, build succeeds, menu bar agent shows a viewfinder icon and a Quit menu. Commit `43826fd`.
-- **Task #2 next:** ScreenCaptureKit harness (`WindowCapture.swift`).
+Agent path is feature-complete and dogfood-able end-to-end. Verified by capturing Calculator from Claude Code via curl over MCP and reading the returned PNG — display reads `777,777`. Both transports work: human (click-to-clipboard) and agent (MCP).
+
+Done:
+- **#1 Xcode project** (commit `43826fd`)
+- **#2 ScreenCaptureKit harness** — `WindowCapture.swift`, three async entry points
+- **#3 Screen Recording permission flow** — preflight, grant button, deep link, icon state
+- **#4 MCP server scaffold** — `MCPServer.swift` + `MCPTokenStore.swift` ported from Niacin, port `11474`, bearer auth, Keychain token
+- **#5 MCP tools** — `MCPTools.swift` with `list_windows` / `capture_window` / `capture_app`, base64 PNG image content blocks
+- **#7 partial** — click-to-clipboard menu with permission-reactive icon + per-app entries
+
+Deferred (post-MVP, in roughly priority order):
+- **#6 Per-app approval cache** — gate 2 NSAlert before first MCP capture of a new app. Needed before this token leaves the local machine (remote-tools scenario).
+- **#8 Settings window** — SwiftUI Settings scene mirroring Niacin's MCP section. Current menu has Copy Config / Copy token / Test connection / Regenerate token as a stopgap.
+- **#9 Claude Desktop smoke test** — formal end-to-end with the actual Claude Desktop client and `SETUP.md`.
+- **#7 polish** — multi-window submenu, brief capture-flash, NSStatusItem refactor for richer icon states.
 - See `TODO.md` for the full task list and dependencies.
 - See `DESIGN.md` for the full design rationale.
 
-## Build & run
+## Build, run, test
 
 ```bash
 # Build from CLI
 xcodebuild -project peek.xcodeproj -scheme peek -configuration Debug -destination 'platform=macOS' build
 
-# Or just open in Xcode
+# Run the unit test target (peekTests). peekUITests is a template stub and
+# is skipped by default — its runner needs Accessibility and the app has no
+# foreground UI for XCUIApplication() to attach to.
+xcodebuild -project peek.xcodeproj -scheme peek -destination 'platform=macOS' \
+  test -only-testing:peekTests
+
+# Run a single Swift Testing test by function name
+xcodebuild -project peek.xcodeproj -scheme peek -destination 'platform=macOS' \
+  test -only-testing:peekTests/windowCaptureErrorDescriptions
+
+# Or just open in Xcode (⌘R to run, ⌘U for tests)
 open peek.xcodeproj
 ```
 
