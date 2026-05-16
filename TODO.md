@@ -15,6 +15,7 @@ Status as of 2026-05-15. **MVP shipped** — agent path works end-to-end (verifi
 | 7 | ◐ partial | Menu bar shell with click-to-clipboard capture (scaffolded — icon state + clipboard work; multi-window submenu, capture-flash, on-demand menuNeedsUpdate parity TBD) |
 | 8 | ▢ pending | Settings window |
 | 9 | ▢ pending | End-to-end smoke test with Claude Desktop |
+| 10 | ▢ pending | Claude Desktop support via stdio bridge |
 
 ## Build order
 
@@ -141,11 +142,39 @@ No standalone "test capture" button — the menu bar's click-to-clipboard featur
 
 ### #9 End-to-end smoke test with Claude Desktop
 
-Generate Claude Desktop MCP config snippet from Settings → paste into `~/Library/Application Support/Claude/claude_desktop_config.json` → restart Claude → confirm `peek.list_windows` and `peek.capture_window` tools appear → run "what's in my Calculator app?" → verify image returns and Claude reads it correctly.
+Generate Claude Desktop MCP config snippet from Settings → paste into `~/Library/Application Support/Claude/claude_desktop_config.json` → restart Claude → confirm `list_windows` and `capture_window` tools appear → run "what's in my Calculator app?" → verify image returns and Claude reads it correctly.
 
 Document the setup in a `SETUP.md`.
 
-**Blocked by:** #5, #8.
+**Blocked by:** #5, #8, #10.
+
+### #10 Claude Desktop support via stdio bridge
+
+**Why:** Discovered during the MVP smoke that Claude Desktop's `claude_desktop_config.json` rejects the streamable-HTTP `url` shape Niacin and Peek's `Copy Config` emit — popups *"Some MCP servers could not be loaded… entries are not valid MCP server configurations and were skipped: peek"*. Claude Desktop currently only honours the stdio transport (`command` + `args`).
+
+The agent path otherwise works end-to-end (verified via curl from Claude Code), so this is purely a transport-bridging problem.
+
+**Approach options:**
+1. **`mcp-remote` proxy.** The well-trodden Anthropic-ecosystem npm package. Config becomes:
+   ```json
+   { "mcpServers": { "peek": { "command": "npx",
+     "args": ["-y", "mcp-remote@<pin>", "http://127.0.0.1:11474/",
+              "--allow-http", "--transport", "http-only",
+              "--header", "Authorization: Bearer <token>"] } } }
+   ```
+   - Pin a version (`mcp-remote@x.y.z`) to avoid drift.
+   - Document the third-party-exec trust trade-off in `SETUP.md` and Settings UI — Claude Desktop will fetch and run this on every launch.
+   - Update `MenuModel.copyMCPConfig()` to emit a Claude-Desktop-flavoured snippet (or have two buttons: *Copy Claude Code config* / *Copy Claude Desktop config*).
+
+2. **Ship a Peek-native stdio shim.** A tiny CLI binary (or Swift script) inside the bundle that speaks stdio MCP to Claude Desktop and proxies to the in-process HTTP server. Avoids the npm dependency but is more code to maintain. Most apps in this space go option 1.
+
+3. **Wait for native HTTP MCP in Claude Desktop.** Anthropic is moving in that direction across clients. When it lands, just point users at the existing `Copy Config` snippet. Track the rollout — if it's near, the bridge work may not be worth shipping.
+
+**Trust-gate prereq:** #6 (per-app approval cache) must land before this is dogfooded, especially via the remote-tools path. Once Claude Desktop is a bridge for off-device requests, the per-app NSAlert is the only meaningful safeguard between an agent and Slack/1Password/whatever else is captureable.
+
+**Current state:** the bare-URL snippet from `Copy Claude Desktop config` works with Claude Code and is what Peek ships in v0. Claude Desktop users can paste it but will see the warning popup until #10 lands.
+
+**Blocked by:** #5 (done). **Should sequence after:** #6.
 
 ## Decision log
 

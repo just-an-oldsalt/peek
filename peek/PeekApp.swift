@@ -89,6 +89,10 @@ final class MenuModel: ObservableObject {
             status = "MCP config not ready"
             return
         }
+        // Streamable-HTTP MCP config. Works directly with Claude Code and any
+        // client that supports the HTTP transport. Claude Desktop today only
+        // accepts the stdio transport in claude_desktop_config.json — see
+        // TODO.md #10 for the proxy-bridge work needed to support it.
         let snippet = """
         {
           "mcpServers": {
@@ -104,7 +108,7 @@ final class MenuModel: ObservableObject {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(snippet, forType: .string)
-        status = "Claude Desktop config copied"
+        status = "Config copied (Claude Code / HTTP-MCP clients)"
     }
 
     func regenerateMCPToken() {

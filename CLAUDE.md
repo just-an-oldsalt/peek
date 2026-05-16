@@ -26,8 +26,9 @@ Done:
 
 Deferred (post-MVP, in roughly priority order):
 - **#6 Per-app approval cache** — gate 2 NSAlert before first MCP capture of a new app. Needed before this token leaves the local machine (remote-tools scenario).
+- **#10 Claude Desktop support via stdio bridge** — uncovered during the MVP smoke: Claude Desktop rejects the streamable-HTTP `url` shape. Needs an `mcp-remote` proxy (or native shim). See TODO.md #10 for the approach matrix. Sequence after #6.
 - **#8 Settings window** — SwiftUI Settings scene mirroring Niacin's MCP section. Current menu has Copy Config / Copy token / Test connection / Regenerate token as a stopgap.
-- **#9 Claude Desktop smoke test** — formal end-to-end with the actual Claude Desktop client and `SETUP.md`.
+- **#9 Claude Desktop smoke test** — formal end-to-end with the actual Claude Desktop client and `SETUP.md`. Blocked on #10.
 - **#7 polish** — multi-window submenu, brief capture-flash, NSStatusItem refactor for richer icon states.
 - See `TODO.md` for the full task list and dependencies.
 - See `DESIGN.md` for the full design rationale.
