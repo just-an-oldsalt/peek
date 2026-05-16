@@ -139,7 +139,23 @@ final class MCPServer {
         }
     }
 
+    // Hard ceiling on concurrent connections. A misbehaving (or malicious)
+    // local process could otherwise hold thousands of slow-loris connections
+    // open and exhaust file descriptors. 32 is well above the few any real
+    // MCP workflow uses.
+    private static let maxConcurrentConnections = 32
+
+    // Per-request read deadline. Defends against slow-loris by guaranteeing
+    // every connection terminates within a bounded window even if the peer
+    // dribbles bytes one at a time.
+    private static let requestTimeoutSeconds: Double = 10
+
     private func accept(connection: NWConnection) {
+        guard connections.count < Self.maxConcurrentConnections else {
+            log.warning("mcp: rejecting connection — at capacity (\(Self.maxConcurrentConnections, privacy: .public))")
+            connection.cancel()
+            return
+        }
         let id = ObjectIdentifier(connection)
         connections[id] = connection
         connection.stateUpdateHandler = { [weak self] state in
@@ -154,7 +170,10 @@ final class MCPServer {
         // listener queue.
         Task.detached { [weak self] in
             do {
-                let request = try await readHTTPRequest(connection: connection)
+                let request = try await readHTTPRequestWithTimeout(
+                    connection: connection,
+                    timeout: Self.requestTimeoutSeconds
+                )
                 let response: HTTPResponse
                 if let server = self {
                     response = await server.handle(request: request)
@@ -173,6 +192,20 @@ final class MCPServer {
     // MARK: - Request handling (main-actor isolated — touches delegate)
 
     func handle(request: HTTPRequest) async -> HTTPResponse {
+        // Host header pinning — defeats DNS rebinding. A site the user visits
+        // can resolve `attacker.example` to `127.0.0.1` after the page loads
+        // and have the browser issue requests with `Host: attacker.example`.
+        // Loopback alone doesn't stop that; this does.
+        let portString = actualPort.map(String.init) ?? ""
+        let allowedHosts: Set<String> = [
+            "127.0.0.1:\(portString)",
+            "localhost:\(portString)",
+        ]
+        guard let host = request.headers["host"], allowedHosts.contains(host) else {
+            log.warning("mcp: rejecting host=\(request.headers["host"] ?? "?", privacy: .public)")
+            return jsonRPCErrorResponse(httpStatus: 403, code: -32001, message: "forbidden host")
+        }
+
         guard let stored = (try? MCPTokenStore.currentToken()), !stored.isEmpty else {
             return jsonRPCErrorResponse(httpStatus: 503, code: -32001, message: "MCP server not configured (no token)")
         }
@@ -198,7 +231,16 @@ final class MCPServer {
     private func isBearer(_ header: String, token: String) -> Bool {
         let parts = header.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard parts.count == 2, parts[0].lowercased() == "bearer" else { return false }
-        return String(parts[1]) == token
+        // Constant-time compare. Short-circuiting `==` would leak per-byte
+        // timing on the localhost path; XOR-fold every byte then test once.
+        let presented = Array(String(parts[1]).utf8)
+        let expected = Array(token.utf8)
+        guard presented.count == expected.count else { return false }
+        var diff: UInt8 = 0
+        for i in 0..<presented.count {
+            diff |= presented[i] ^ expected[i]
+        }
+        return diff == 0
     }
 
     private func dispatch(envelope: JSONRPCEnvelope) async -> HTTPResponse {
@@ -328,20 +370,46 @@ nonisolated private func statusReason(_ code: Int) -> String {
 private enum HTTPParseError: Error, LocalizedError {
     case incomplete
     case malformedRequestLine
+    case malformedContentLength
     case bodyTooLarge
     case connectionClosed
+    case timedOut
 
     var errorDescription: String? {
         switch self {
-        case .incomplete:           return "incomplete request"
-        case .malformedRequestLine: return "malformed request line"
-        case .bodyTooLarge:         return "body too large"
-        case .connectionClosed:     return "connection closed before request completed"
+        case .incomplete:             return "incomplete request"
+        case .malformedRequestLine:   return "malformed request line"
+        case .malformedContentLength: return "malformed Content-Length"
+        case .bodyTooLarge:           return "body too large"
+        case .connectionClosed:       return "connection closed before request completed"
+        case .timedOut:               return "request timed out"
         }
     }
 }
 
 nonisolated private let maxBodyBytes = 256 * 1024
+
+// Race the read against a wall-clock deadline. Either one finishing cancels
+// the other, so a slow-loris peer can't tie up a connection past `timeout`.
+nonisolated private func readHTTPRequestWithTimeout(
+    connection: NWConnection,
+    timeout: Double
+) async throws -> HTTPRequest {
+    try await withThrowingTaskGroup(of: HTTPRequest.self) { group in
+        group.addTask {
+            try await readHTTPRequest(connection: connection)
+        }
+        group.addTask {
+            try await Task.sleep(for: .seconds(timeout))
+            throw HTTPParseError.timedOut
+        }
+        guard let result = try await group.next() else {
+            throw HTTPParseError.connectionClosed
+        }
+        group.cancelAll()
+        return result
+    }
+}
 
 nonisolated private func readHTTPRequest(connection: NWConnection) async throws -> HTTPRequest {
     var buffer = Data()
@@ -377,7 +445,18 @@ nonisolated private func readHTTPRequest(connection: NWConnection) async throws 
         }
     }
 
-    let contentLength = Int(headers["content-length"] ?? "0") ?? 0
+    // Content-Length must be a non-negative integer when present; missing
+    // header means 0. Anything else (negative, non-numeric, overflow) is a
+    // hard error rather than silent-coerce-to-zero.
+    let contentLength: Int
+    if let raw = headers["content-length"] {
+        guard let parsed = Int(raw), parsed >= 0 else {
+            throw HTTPParseError.malformedContentLength
+        }
+        contentLength = parsed
+    } else {
+        contentLength = 0
+    }
     if contentLength > maxBodyBytes { throw HTTPParseError.bodyTooLarge }
 
     while bodyBuffer.count < contentLength {
