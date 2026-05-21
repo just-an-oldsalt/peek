@@ -1,6 +1,6 @@
 # Peek — MVP task list
 
-Status as of 2026-05-15. **MVP shipped** — agent path works end-to-end (verified via `capture_app` round-trip against Calculator). Remaining tasks (#6, #7 polish, #8, #9) are post-MVP hardening.
+Status as of 2026-05-20. **1.0 release candidate.** Agent path end-to-end + trust gates + Settings + Claude Desktop bridge + App-Store-compliant manifests all landed. Remaining: live Claude Desktop smoke (manual) and the multi-display capture (deferred to 1.1).
 
 ## Status snapshot
 
@@ -11,12 +11,19 @@ Status as of 2026-05-15. **MVP shipped** — agent path works end-to-end (verifi
 | 3 | ✅ done | Handle Screen Recording permission flow |
 | 4 | ✅ done | Port MCP server scaffold from Niacin |
 | 5 | ✅ done | Implement MCP tools (`list_windows`, `capture_window`, `capture_app`) |
-| 6 | ▢ pending | Per-app approval cache |
-| 7 | ◐ partial | Menu bar shell with click-to-clipboard capture (scaffolded — icon state + clipboard work; multi-window submenu, capture-flash, on-demand menuNeedsUpdate parity TBD) |
-| 8 | ▢ pending | Settings window |
-| 9 | ▢ pending | End-to-end smoke test with Claude Desktop |
-| 10 | ▢ pending | Claude Desktop support via stdio bridge |
-| 11 | ▢ pending | Display enumeration + per-monitor capture |
+| 6 | ✅ done | Per-app approval cache (gate 2) — NSAlert + UserDefaults store + revoke UI |
+| 7 | ◐ partial | Menu bar shell with click-to-clipboard capture (multi-window submenu done; capture-flash + NSStatusItem refactor deferred) |
+| 8 | ✅ done | Settings window (MCP / Permissions / Trusted Apps tabs + MDM section) |
+| 9 | ◐ partial | End-to-end smoke — Claude Code path verified, Claude Desktop path pending live human run with `SETUP.md` |
+| 10 | ✅ done | Claude Desktop support via stdio bridge — pinned `mcp-remote@0.1.38` snippet in Settings |
+| 11 | ▢ deferred (1.1) | Display enumeration + per-monitor capture |
+
+### 1.0 App Store prep landed
+- `PrivacyInfo.xcprivacy` — no data collection, no tracking, UserDefaults declared with reason CA92.1
+- `Info.plist` — `ITSAppUsesNonExemptEncryption=false`, copyright filled
+- `ManagedPreferences.swift` — MDM keys: `enabled`, `mcpServerEnabled`, `allowedApps`, `deniedApps`, `allowScreenCapture`, `redactWindowTitles`, `disableQuit`
+- `scripts/release.sh` + `RELEASING.md` — Developer ID notarize/staple pipeline + App Store Connect playbook
+- `SETUP.md` — install / permissions / Claude Code + Claude Desktop wiring
 
 ## Build order
 

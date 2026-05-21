@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- No data collection: Peek never sends user data off device. The MCP
+         listener is bound to 127.0.0.1; captured pixels are returned to the
+         requesting local agent over loopback and not retained by Peek. -->
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+
+    <!-- No tracking. -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <!-- Required-reason API declarations. -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <!-- UserDefaults: stores the per-app approval cache (which
+                 bundle IDs the user has authorised an agent to capture)
+                 and the MCP server enabled toggle. Both are app-internal
+                 preferences. -->
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

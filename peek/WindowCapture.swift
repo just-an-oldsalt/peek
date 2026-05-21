@@ -17,6 +17,7 @@ enum WindowCaptureError: Error, CustomStringConvertible {
     case appNotRunning(String)
     case captureFailed(any Error)
     case encodingFailed
+    case policyDenied(String)
 
     var description: String {
         switch self {
@@ -30,6 +31,8 @@ enum WindowCaptureError: Error, CustomStringConvertible {
             return "Capture failed: \(error.localizedDescription)"
         case .encodingFailed:
             return "Failed to encode capture as PNG"
+        case .policyDenied(let reason):
+            return reason
         }
     }
 }
@@ -44,6 +47,26 @@ enum WindowCapture {
         return content.windows
             .filter { isCaptureableWindow($0, matching: app) }
             .map(makeWindowInfo)
+    }
+
+    /// Resolve a window id to its `WindowInfo` without capturing — used to
+    /// fetch the bundle ID before consulting the approval gate.
+    static func resolveWindow(id: CGWindowID) async throws -> WindowInfo {
+        let content = try await fetchContent()
+        guard let window = content.windows.first(where: { $0.windowID == id }) else {
+            throw WindowCaptureError.windowNotFound(id)
+        }
+        return makeWindowInfo(window)
+    }
+
+    /// Resolve the frontmost captureable window matching `name` without
+    /// capturing — used to fetch the bundle ID before the approval gate.
+    static func resolveApp(name: String) async throws -> WindowInfo {
+        let content = try await fetchContent()
+        guard let frontmost = content.windows.first(where: { isCaptureableWindow($0, matching: name) }) else {
+            throw WindowCaptureError.appNotRunning(name)
+        }
+        return makeWindowInfo(frontmost)
     }
 
     static func captureWindow(id: CGWindowID) async throws -> Data {
