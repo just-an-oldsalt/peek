@@ -194,6 +194,17 @@ Take at least one, up to ten. Recommended for Peek:
 
 Tip: use `xcrun simctl io` or a real screen recording on a fresh user profile so window contents are clean. Crop the menu bar tightly — the App Store rejects screenshots that look like generic desktop shots.
 
+### Screenshot OS groups (matters since macOS 26)
+
+App Store Connect splits the macOS screenshot section into two groups, gated by what your binary's `MACOSX_DEPLOYMENT_TARGET` supports:
+
+- **Operating Systems Earlier than Version 26** — Sonoma 14, Sequoia 15
+- **Operating Systems 26 and Later** — Tahoe 26+
+
+Peek's deployment target is `14.0`, so it qualifies for **both** groups, and App Store Connect requires at least one screenshot in **each** before you can submit. Peek's UI is identical across all three OS major versions, so the simplest move is to **upload the same PNG set to both groups** — drag the same files in twice. Don't take separate "older OS" screenshots unless you actually have a visual difference to show.
+
+If you ever raise the deployment target to 26+, this section collapses to one group automatically.
+
 ## Submission checklist
 
 - [ ] Bundle ID matches App Store Connect record
