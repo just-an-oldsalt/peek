@@ -11,15 +11,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct PeekApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var menu = MenuModel()
+    @StateObject private var app = AppState.shared
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContents(menu: menu)
+            MenuContents(app: app)
         } label: {
-            MenuBarLabel(menu: menu)
+            MenuBarLabel(app: app)
         }
         .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView()
+                .environmentObject(app)
+                .environmentObject(app.approvals)
+        }
 
         Window("About Peek", id: "about") {
             AboutView()
@@ -30,15 +36,17 @@ struct PeekApp: App {
 }
 
 private struct MenuBarLabel: View {
-    @ObservedObject var menu: MenuModel
+    @ObservedObject var app: AppState
 
     var body: some View {
-        Image(systemName: menu.permissionGranted ? "viewfinder" : "viewfinder.slash")
+        Image(systemName: app.permissionGranted ? "viewfinder" : "viewfinder.slash")
     }
 }
 
 @MainActor
-final class MenuModel: ObservableObject {
+final class AppState: ObservableObject {
+    static let shared = AppState()
+
     struct AppEntry: Identifiable, Hashable {
         let id: pid_t
         let name: String
@@ -54,17 +62,26 @@ final class MenuModel: ObservableObject {
     @Published private(set) var mcpPort: UInt16?
     @Published private(set) var mcpToken: String?
     @Published private(set) var mcpError: String?
+    @Published private(set) var mcpRunning = false
 
+    let approvals = AppApprovalStore()
     private let server: MCPServer
-    private let mcpDelegate = PeekMCPDelegate()
+    private let mcpDelegate: PeekMCPDelegate
 
-    init() {
-        server = MCPServer()
-        server.setDelegate(mcpDelegate)
+    private init() {
+        let approvals = self.approvals
+        let delegate = PeekMCPDelegate(approvals: approvals)
+        self.mcpDelegate = delegate
+        self.server = MCPServer()
+        server.setDelegate(delegate)
         bootstrapMCP()
     }
 
     private func bootstrapMCP() {
+        guard ManagedPreferences.isEnabled else {
+            mcpError = "Peek is disabled by organisation policy"
+            return
+        }
         do {
             if try MCPTokenStore.currentToken() == nil {
                 _ = try MCPTokenStore.generateAndStore()
@@ -74,11 +91,27 @@ final class MenuModel: ObservableObject {
             mcpError = "Token init failed: \(error.localizedDescription)"
             return
         }
-        do {
-            try server.start()
-            mcpPort = server.actualPort
-        } catch {
-            mcpError = "MCP start failed: \(error.localizedDescription)"
+        startServerIfPolicyAllows()
+    }
+
+    /// Starts or stops the MCP server to match `ManagedPreferences.resolvedMCPServerEnabled`.
+    /// Called from `bootstrapMCP()`, from the Settings toggle, and on policy reload.
+    func startServerIfPolicyAllows() {
+        let wantRunning = ManagedPreferences.isEnabled && ManagedPreferences.resolvedMCPServerEnabled
+        if wantRunning, !server.isRunning {
+            do {
+                try server.start()
+                mcpPort = server.actualPort
+                mcpRunning = true
+                mcpError = nil
+            } catch {
+                mcpError = "MCP start failed: \(error.localizedDescription)"
+                mcpRunning = false
+            }
+        } else if !wantRunning, server.isRunning {
+            server.stop()
+            mcpPort = nil
+            mcpRunning = false
         }
     }
 
@@ -90,15 +123,13 @@ final class MenuModel: ObservableObject {
         status = "MCP token copied to clipboard"
     }
 
-    func copyMCPConfig() {
+    /// Streamable-HTTP MCP config — works directly with Claude Code, Cursor,
+    /// and other clients that support the HTTP transport.
+    func copyClaudeCodeConfig() {
         guard let token = mcpToken, let port = mcpPort else {
             status = "MCP config not ready"
             return
         }
-        // Streamable-HTTP MCP config. Works directly with Claude Code and any
-        // client that supports the HTTP transport. Claude Desktop today only
-        // accepts the stdio transport in claude_desktop_config.json — see
-        // TODO.md #10 for the proxy-bridge work needed to support it.
         let snippet = """
         {
           "mcpServers": {
@@ -114,8 +145,46 @@ final class MenuModel: ObservableObject {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(snippet, forType: .string)
-        status = "Config copied (Claude Code / HTTP-MCP clients)"
+        status = "Config copied for Claude Code"
     }
+
+    /// stdio-via-mcp-remote bridge — required for Claude Desktop, which
+    /// doesn't yet accept the streamable-HTTP `url` shape. Pinned version
+    /// avoids drift; bump in lockstep with verified-good releases.
+    func copyClaudeDesktopConfig() {
+        guard let token = mcpToken, let port = mcpPort else {
+            status = "MCP config not ready"
+            return
+        }
+        let snippet = """
+        {
+          "mcpServers": {
+            "peek": {
+              "command": "npx",
+              "args": [
+                "-y",
+                "mcp-remote@\(Self.mcpRemoteVersionPin)",
+                "http://127.0.0.1:\(port)/",
+                "--allow-http",
+                "--transport",
+                "http-only",
+                "--header",
+                "Authorization: Bearer \(token)"
+              ]
+            }
+          }
+        }
+        """
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(snippet, forType: .string)
+        status = "Config copied for Claude Desktop"
+    }
+
+    /// Pinned `mcp-remote` version used by the Claude Desktop config snippet.
+    /// Claude Desktop fetches and runs this via `npx -y` on every launch, so
+    /// drift is observable to the user and reviewable in a security audit.
+    static let mcpRemoteVersionPin = "0.1.38"
 
     func regenerateMCPToken() {
         do {
@@ -203,32 +272,33 @@ final class MenuModel: ObservableObject {
 }
 
 private struct MenuContents: View {
-    @ObservedObject var menu: MenuModel
+    @ObservedObject var app: AppState
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Group {
-            if !menu.permissionGranted {
+            if !app.permissionGranted {
                 Text("Screen Recording permission required")
                 Button("Grant Screen Recording…") {
-                    menu.requestPermission()
+                    app.requestPermission()
                 }
                 Text("After granting, quit and relaunch Peek.")
             } else {
                 Menu("Capture window to clipboard") {
-                    if menu.apps.isEmpty {
-                        Text(menu.isRefreshing ? "Loading…" : "No captureable windows")
+                    if app.apps.isEmpty {
+                        Text(app.isRefreshing ? "Loading…" : "No captureable windows")
                     } else {
-                        ForEach(menu.apps) { entry in
+                        ForEach(app.apps) { entry in
                             Button(entry.name) {
-                                Task { await menu.capture(entry) }
+                                Task { await app.capture(entry) }
                             }
                         }
                     }
                 }
             }
 
-            if let status = menu.status {
+            if let status = app.status {
                 Divider()
                 Text(status)
             }
@@ -236,28 +306,29 @@ private struct MenuContents: View {
             Divider()
 
             Section("MCP") {
-                if let port = menu.mcpPort {
+                if !ManagedPreferences.isEnabled {
+                    Text("Disabled by organisation policy")
+                } else if app.mcpRunning, let port = app.mcpPort {
                     Text("Listening on 127.0.0.1:\(String(port))")
-                } else if let err = menu.mcpError {
+                } else if let err = app.mcpError {
                     Text(err)
+                } else if !ManagedPreferences.resolvedMCPServerEnabled {
+                    Text("MCP server disabled — enable in Settings")
                 } else {
                     Text("Starting…")
                 }
-                Button("Copy Claude Desktop config") { menu.copyMCPConfig() }
-                    .disabled(menu.mcpToken == nil || menu.mcpPort == nil)
-                Button("Copy MCP token") { menu.copyMCPToken() }
-                    .disabled(menu.mcpToken == nil)
-                Button("Test connection") {
-                    Task { await menu.testMCPConnection() }
-                }
-                .disabled(menu.mcpToken == nil || menu.mcpPort == nil)
-                Button("Regenerate token") { menu.regenerateMCPToken() }
             }
 
             Divider()
 
+            Button("Settings…") {
+                openSettings()
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            .keyboardShortcut(",")
+
             Button("Refresh") {
-                Task { await menu.refresh() }
+                Task { await app.refresh() }
             }
 
             Divider()
@@ -267,11 +338,13 @@ private struct MenuContents: View {
                 NSApp.activate(ignoringOtherApps: true)
             }
 
-            Button("Quit Peek") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
+            if !ManagedPreferences.disableQuit {
+                Button("Quit Peek") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q")
+            }
         }
         .onAppear {
-            Task { await menu.refresh() }
+            Task { await app.refresh() }
         }
     }
 }

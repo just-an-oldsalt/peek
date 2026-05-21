@@ -13,7 +13,7 @@ struct AboutView: View {
     }
 
     private let productName = "Peek"
-    private let tagline = "Hand any Mac window to your AI agent — local-only, bearer-authenticated, ScreenCaptureKit under the hood."
+    private let tagline = "Hand any app window to your AI agent — local-only, bearer-authenticated, ScreenCaptureKit under the hood."
 
     var body: some View {
         VStack(spacing: 20) {
@@ -34,6 +34,7 @@ struct AboutView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 

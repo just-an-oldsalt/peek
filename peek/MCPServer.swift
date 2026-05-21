@@ -203,16 +203,28 @@ final class MCPServer {
         ]
         guard let host = request.headers["host"], allowedHosts.contains(host) else {
             log.warning("mcp: rejecting host=\(request.headers["host"] ?? "?", privacy: .public)")
-            return jsonRPCErrorResponse(httpStatus: 403, code: -32001, message: "forbidden host")
+            return authErrorResponse(
+                httpStatus: 403,
+                error: "forbidden",
+                description: "Host header not allowed"
+            )
         }
 
         guard let stored = (try? MCPTokenStore.currentToken()), !stored.isEmpty else {
-            return jsonRPCErrorResponse(httpStatus: 503, code: -32001, message: "MCP server not configured (no token)")
+            return authErrorResponse(
+                httpStatus: 503,
+                error: "server_not_configured",
+                description: "MCP server has no bearer token configured"
+            )
         }
         guard let auth = request.headers["authorization"],
               isBearer(auth, token: stored) else {
             log.warning("mcp auth failed for \(request.method) \(request.path)")
-            return jsonRPCErrorResponse(httpStatus: 401, code: -32001, message: "unauthorized")
+            return authErrorResponse(
+                httpStatus: 401,
+                error: "invalid_token",
+                description: "Bearer token missing or invalid"
+            )
         }
 
         guard request.method == "POST", request.path == "/" || request.path == "/mcp" else {
@@ -308,6 +320,39 @@ final class MCPServer {
         let err = JSONRPCError(code: code, message: message)
         let envelope = JSONRPCResponse(jsonrpc: "2.0", id: nil, result: nil, error: err)
         return httpJSON(status: httpStatus, body: envelope.encoded())
+    }
+
+    // Auth-layer errors live outside JSON-RPC. Streamable-HTTP MCP clients
+    // expect an OAuth-style body (RFC 6749 §5.2): `{"error":"…","error_description":"…"}`
+    // with a flat string `error` field, not the JSON-RPC `{error: {code, message}}`
+    // object — mcp-remote's Zod schema rejects the latter. 401 also carries
+    // the Bearer challenge header per RFC 6750.
+    private func authErrorResponse(httpStatus: Int, error: String, description: String) -> HTTPResponse {
+        struct AuthErrorBody: Encodable {
+            let error: String
+            let error_description: String
+        }
+        let body = (try? JSONEncoder().encode(
+            AuthErrorBody(error: error, error_description: description)
+        )) ?? Data(#"{"error":"\#(error)"}"#.utf8)
+
+        var headers: [(String, String)] = [("Content-Type", "application/json")]
+        if httpStatus == 401 {
+            // Header-splitting defence: strip CR/LF defensively even though
+            // every current call site passes a static literal. If a future
+            // caller threads user input through here, the splitting attack
+            // is closed at the source.
+            let sanitized = description
+                .replacingOccurrences(of: "\r", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            headers.append((
+                "WWW-Authenticate",
+                "Bearer realm=\"peek\", error=\"\(error)\", error_description=\"\(sanitized)\""
+            ))
+        }
+        return HTTPResponse(status: httpStatus, headers: headers, body: body)
     }
 }
 
@@ -445,12 +490,15 @@ nonisolated private func readHTTPRequest(connection: NWConnection) async throws 
         }
     }
 
-    // Content-Length must be a non-negative integer when present; missing
-    // header means 0. Anything else (negative, non-numeric, overflow) is a
-    // hard error rather than silent-coerce-to-zero.
+    // Content-Length must be ASCII decimal digits only — `Int(raw)` accepts
+    // "+5", Unicode digits like "१२३", and leading-zero forms that some
+    // intermediaries reject. Be strict, since we use this value to size a
+    // buffer read.
     let contentLength: Int
     if let raw = headers["content-length"] {
-        guard let parsed = Int(raw), parsed >= 0 else {
+        guard !raw.isEmpty,
+              raw.allSatisfy({ $0 >= "0" && $0 <= "9" }),
+              let parsed = Int(raw) else {
             throw HTTPParseError.malformedContentLength
         }
         contentLength = parsed

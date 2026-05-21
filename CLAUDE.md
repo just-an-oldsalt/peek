@@ -12,24 +12,22 @@ This is the source-of-truth doc for picking up Peek work in any session.
 
 Sibling to **Niacin** (`~/Documents/GIT/niacin`). Same architectural shape, different OS primitive (ScreenCaptureKit instead of `IOPMAssertion`).
 
-## Status — 2026-05-15: MVP shipped
+## Status — 2026-05-20: 1.0 release candidate
 
-Agent path is feature-complete and dogfood-able end-to-end. Verified by capturing Calculator from Claude Code via curl over MCP and reading the returned PNG — display reads `777,777`. Both transports work: human (click-to-clipboard) and agent (MCP).
+Agent path + trust gates + Settings + Claude Desktop bridge all landed. App-Store-bound manifests in place. Last remaining ship gate is a live Claude Desktop smoke run.
 
-Done:
-- **#1 Xcode project** (commit `43826fd`)
-- **#2 ScreenCaptureKit harness** — `WindowCapture.swift`, three async entry points
-- **#3 Screen Recording permission flow** — preflight, grant button, deep link, icon state
-- **#4 MCP server scaffold** — `MCPServer.swift` + `MCPTokenStore.swift` ported from Niacin, port `11474`, bearer auth, Keychain token
-- **#5 MCP tools** — `MCPTools.swift` with `list_windows` / `capture_window` / `capture_app`, base64 PNG image content blocks
-- **#7 partial** — click-to-clipboard menu with permission-reactive icon + per-app entries
+Done since the 2026-05-15 MVP:
+- **#6 Per-app approval cache** — `AppApprovalStore.swift` (UserDefaults), `AppApprovalPrompt.ask` (NSAlert with Deny / Allow Once / Always Allow), revoke UI in Settings → Trusted Apps.
+- **#7 ManagedPreferences** — Niacin's MDM resolver ported. Keys: `enabled`, `mcpServerEnabled`, `allowedApps`, `deniedApps`, `allowScreenCapture`, `redactWindowTitles`, `disableQuit`. `evaluate(bundleID:appName:)` is the policy gate consulted before the approval cache.
+- **#8 Settings window** — `SettingsView.swift` with three tabs (MCP / Permissions / Trusted Apps) plus a Managed-by-Organisation section that appears when MDM keys are set. SwiftUI `Settings` scene wired in `PeekApp.swift`.
+- **#10 Claude Desktop bridge** — pinned `mcp-remote@0.1.38` (`AppState.mcpRemoteVersionPin`). Settings now has separate Copy Claude Code / Copy Claude Desktop buttons.
+- **App Store prep** — `PrivacyInfo.xcprivacy` (no data collection, UserDefaults declared with reason `CA92.1`), `Info.plist` (`ITSAppUsesNonExemptEncryption=false`, copyright filled), `scripts/release.sh` + `RELEASING.md`, `SETUP.md`.
+- Refactor: old `MenuModel` → `AppState.shared` so the menu bar and Settings window share state. `PeekMCPDelegate` now takes the approval store via init.
 
-Deferred (post-MVP, in roughly priority order):
-- **#6 Per-app approval cache** — gate 2 NSAlert before first MCP capture of a new app. Needed before this token leaves the local machine (remote-tools scenario).
-- **#10 Claude Desktop support via stdio bridge** — uncovered during the MVP smoke: Claude Desktop rejects the streamable-HTTP `url` shape. Needs an `mcp-remote` proxy (or native shim). See TODO.md #10 for the approach matrix. Sequence after #6.
-- **#8 Settings window** — SwiftUI Settings scene mirroring Niacin's MCP section. Current menu has Copy Config / Copy token / Test connection / Regenerate token as a stopgap.
-- **#9 Claude Desktop smoke test** — formal end-to-end with the actual Claude Desktop client and `SETUP.md`. Blocked on #10.
-- **#7 polish** — multi-window submenu, brief capture-flash, NSStatusItem refactor for richer icon states.
+Still open:
+- **#9 Live Claude Desktop smoke** — Claude Code path is curl-verified end-to-end; the Desktop path needs a human-driven run-through of `SETUP.md` once a real install happens.
+- **#7 polish** — capture-flash on click-to-clipboard, NSStatusItem refactor for richer icon states (low priority).
+- **#11 Multi-display** — deferred to 1.1.
 - See `TODO.md` for the full task list and dependencies.
 - See `DESIGN.md` for the full design rationale.
 
