@@ -33,6 +33,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         welcomeController?.show()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Granting Screen Recording happens in System Settings; returning to
+        // Peek afterwards reactivates the app. Re-read consent here so the UI
+        // updates on its own. Non-prompting and a no-op when nothing changed.
+        Task { await AppState.shared.refreshPermission() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -287,6 +294,23 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Re-reads Screen Recording consent without enumerating windows unless the
+    /// state actually changed. Cheap and non-prompting, so it's safe to call on
+    /// every app activation — this is what lets the menu-bar icon, menu, and
+    /// Welcome window reflect a grant the user just made in System Settings
+    /// without requiring a manual Refresh.
+    func refreshPermission() async {
+        let granted = ScreenRecordingPermission.isGranted
+        guard granted != permissionGranted else { return }
+        permissionGranted = granted
+        if granted {
+            await refresh()
+        } else {
+            apps = []
+            status = nil
+        }
+    }
+
     func requestPermission() {
         ScreenRecordingPermission.request()
         ScreenRecordingPermission.openSystemSettings()
@@ -317,7 +341,7 @@ private struct MenuContents: View {
                 Button("Grant Screen Recording…") {
                     app.requestPermission()
                 }
-                Text("After granting, quit and relaunch Peek.")
+                Text("Peek detects the grant automatically — relaunch only if it doesn't.")
             } else {
                 Menu("Capture window to clipboard") {
                     if app.apps.isEmpty {
@@ -416,7 +440,10 @@ final class WelcomeWindowController {
 
 private struct WelcomeView: View {
     let onDismiss: () -> Void
-    @State private var permissionGranted = ScreenRecordingPermission.isGranted
+    // Observe the shared state rather than snapshotting consent on init, so the
+    // window flips from "needs permission" to "enabled" live when the user grants
+    // it in System Settings and returns (see AppDelegate.applicationDidBecomeActive).
+    @ObservedObject private var app = AppState.shared
 
     private var appIcon: NSImage {
         NSRunningApplication.current.icon ?? NSApp.applicationIconImage
@@ -463,7 +490,7 @@ private struct WelcomeView: View {
 
     @ViewBuilder
     private var permissionSection: some View {
-        if permissionGranted {
+        if app.permissionGranted {
             Label("Screen Recording enabled", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .font(.callout)
