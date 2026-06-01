@@ -337,8 +337,8 @@ private struct MenuContents: View {
     var body: some View {
         Group {
             if !app.permissionGranted {
-                Text("Screen Recording permission required")
-                Button("Grant Screen Recording…") {
+                Text("Peek needs Screen Recording access to capture windows.")
+                Button("Continue") {
                     app.requestPermission()
                 }
                 Text("Peek detects the grant automatically — relaunch only if it doesn't.")
@@ -500,7 +500,7 @@ private struct WelcomeView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Button("Grant Screen Recording…") {
+                Button("Continue") {
                     AppState.shared.requestPermission()
                 }
             }
