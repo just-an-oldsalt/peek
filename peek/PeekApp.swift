@@ -3,6 +3,43 @@ import AppKit
 import Combine
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var welcomeController: WelcomeWindowController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Peek is an LSUIElement (menu-bar-only) app, so its only launch-time
+        // UI is the MenuBarExtra icon — which a reviewer can miss when it's
+        // pushed under the notch or a crowded menu bar (App Review 2.1a).
+        // Show a welcome window on first launch, and whenever Screen Recording
+        // hasn't been granted yet (the app can't capture without it), so there
+        // is always a visible window on launch.
+        let key = "com.oldsalt.peek.hasShownWelcome"
+        let defaults = UserDefaults.standard
+        let firstLaunch = !defaults.bool(forKey: key)
+        guard firstLaunch || !ScreenRecordingPermission.isGranted else { return }
+        defaults.set(true, forKey: key)
+        // Defer out of the launch display cycle. Creating/hosting the window
+        // synchronously here throws inside AppKit's first Auto Layout pass
+        // (EXC_BREAKPOINT via -[NSApplication _crashOnException:]); running it
+        // on the next main-loop turn lets the launch transaction finish first.
+        DispatchQueue.main.async { [weak self] in
+            self?.showWelcome()
+        }
+    }
+
+    func showWelcome() {
+        if welcomeController == nil {
+            welcomeController = WelcomeWindowController()
+        }
+        welcomeController?.show()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Granting Screen Recording happens in System Settings; returning to
+        // Peek afterwards reactivates the app. Re-read consent here so the UI
+        // updates on its own. Non-prompting and a no-op when nothing changed.
+        Task { await AppState.shared.refreshPermission() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -39,7 +76,11 @@ private struct MenuBarLabel: View {
     @ObservedObject var app: AppState
 
     var body: some View {
-        Image(systemName: app.permissionGranted ? "viewfinder" : "viewfinder.slash")
+        // `viewfinder.slash` is not a real SF Symbol, so it renders blank —
+        // which made the menu bar icon invisible whenever Screen Recording
+        // wasn't granted (e.g. a fresh install). That blank icon was the root
+        // cause of the App Review 2.1a "no UI on launch" rejection.
+        Image(systemName: app.permissionGranted ? "viewfinder" : "viewfinder.trianglebadge.exclamationmark")
     }
 }
 
@@ -253,6 +294,23 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Re-reads Screen Recording consent without enumerating windows unless the
+    /// state actually changed. Cheap and non-prompting, so it's safe to call on
+    /// every app activation — this is what lets the menu-bar icon, menu, and
+    /// Welcome window reflect a grant the user just made in System Settings
+    /// without requiring a manual Refresh.
+    func refreshPermission() async {
+        let granted = ScreenRecordingPermission.isGranted
+        guard granted != permissionGranted else { return }
+        permissionGranted = granted
+        if granted {
+            await refresh()
+        } else {
+            apps = []
+            status = nil
+        }
+    }
+
     func requestPermission() {
         ScreenRecordingPermission.request()
         ScreenRecordingPermission.openSystemSettings()
@@ -283,7 +341,7 @@ private struct MenuContents: View {
                 Button("Grant Screen Recording…") {
                     app.requestPermission()
                 }
-                Text("After granting, quit and relaunch Peek.")
+                Text("Peek detects the grant automatically — relaunch only if it doesn't.")
             } else {
                 Menu("Capture window to clipboard") {
                     if app.apps.isEmpty {
@@ -345,6 +403,107 @@ private struct MenuContents: View {
         }
         .onAppear {
             Task { await app.refresh() }
+        }
+    }
+}
+
+// First-launch onboarding window. Hosted in an explicit AppKit NSWindow rather
+// than a SwiftUI scene because it is shown from `applicationDidFinishLaunching`,
+// where `openWindow` isn't available and SwiftUI scene timing is unreliable.
+@MainActor
+final class WelcomeWindowController {
+    private var window: NSWindow?
+
+    func show() {
+        if window == nil {
+            let hosting = NSHostingController(rootView: WelcomeView { [weak self] in
+                self?.window?.close()
+            })
+            hosting.sizingOptions = [.preferredContentSize]
+            let w = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 380, height: 460),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            w.title = "Welcome to Peek"
+            w.contentViewController = hosting
+            w.isReleasedWhenClosed = false
+            w.center()
+            window = w
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
+    }
+}
+
+private struct WelcomeView: View {
+    let onDismiss: () -> Void
+    // Observe the shared state rather than snapshotting consent on init, so the
+    // window flips from "needs permission" to "enabled" live when the user grants
+    // it in System Settings and returns (see AppDelegate.applicationDidBecomeActive).
+    @ObservedObject private var app = AppState.shared
+
+    private var appIcon: NSImage {
+        NSRunningApplication.current.icon ?? NSApp.applicationIconImage
+    }
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(nsImage: appIcon)
+                .resizable()
+                .frame(width: 72, height: 72)
+
+            Text("Welcome to Peek")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            (Text("Peek lives in your menu bar. Look for the ")
+                + Text(Image(systemName: "viewfinder"))
+                + Text(" icon near the clock, top-right of your screen — click it to capture any window or open Settings."))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            permissionSection
+
+            Text("Peek also runs a local, bearer-authenticated MCP server on 127.0.0.1 so AI agents can request a window capture on demand. Manage it under Settings → MCP.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            HStack {
+                Link("Support", destination: URL(string: "https://peek.dort.zone/support")!)
+                Spacer()
+                Button("Get Started") { onDismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(28)
+        .frame(width: 380)
+    }
+
+    @ViewBuilder
+    private var permissionSection: some View {
+        if app.permissionGranted {
+            Label("Screen Recording enabled", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.callout)
+        } else {
+            VStack(spacing: 8) {
+                Text("Peek needs Screen Recording permission to capture windows.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Grant Screen Recording…") {
+                    AppState.shared.requestPermission()
+                }
+            }
         }
     }
 }
