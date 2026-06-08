@@ -26,11 +26,21 @@ Peek
 
 ### Subtitle (30 char max)
 
+App Store Connect labels this field "Subtitle" and describes it as: *"A summary of your app that will appear under your app's name on your App Store product page. This can't be longer than 30 characters."*
+
 ```
-Local windows for AI agents.
+Let your agent take a peek.
 ```
 
-(28 / 30) — trademark-clean; no "Mac", "macOS", or other Apple marks as product modifiers.
+(27 / 30) — leans on the app-name pun (the app is *peek*, the action is *peek*). Trademark-clean; no "Mac", "macOS", or other Apple marks as product modifiers.
+
+**Alternates** if you want a different tone:
+
+| Subtitle | Chars | Vibe |
+|---|---|---|
+| `Skip the screenshot-and-paste.` | 30 | Pain-point-led |
+| `Your agent's screenshot button.` | 30 | Punchy / utilitarian |
+| `Local windows for AI agents.` | 28 | Conservative / descriptive |
 
 ### Promotional text (170 char max, editable any time without resubmission)
 

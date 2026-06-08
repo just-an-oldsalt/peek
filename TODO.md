@@ -17,6 +17,7 @@ Status as of 2026-05-20. **1.0 release candidate.** Agent path end-to-end + trus
 | 9 | ◐ partial | End-to-end smoke — Claude Code path verified, Claude Desktop path pending live human run with `SETUP.md` |
 | 10 | ✅ done | Claude Desktop support via stdio bridge — pinned `mcp-remote@0.1.38` snippet in Settings |
 | 11 | ▢ deferred (1.1) | Display enumeration + per-monitor capture |
+| 12 | ▢ investigate | ScreenCaptureKit fails on Firefox windows |
 
 ### 1.0 App Store prep landed
 - `PrivacyInfo.xcprivacy` — no data collection, no tracking, UserDefaults declared with reason CA92.1
@@ -223,3 +224,17 @@ Calls already made during scoping. Do not re-litigate without a conversation:
 - **No Accessibility entitlement.** Ever. SCK composites occluded pixels for us.
 - **No agent-initiated full-screen capture** (`peek.capture_screen`) in v0 — per-window only.
 - **No OCR endpoint.** Return pixels; let the LLM read.
+
+### #12 Investigate: SCK fails on Firefox windows
+
+**Symptom:** `capture_window` and `capture_app` against any Firefox window return `Capture failed: Failed to start stream due to audio/video capture failure` (`SCStreamErrorAttemptToStartStreamState` from SCK). Other apps in the same session (Calculator, Maps, Mail, Notes, Xcode) capture fine, so Screen Recording permission and the SCK plumbing are not the issue. Discovered 2026-05-20 trying to capture an App Store Connect tab in Firefox.
+
+**Hypothesis:** Firefox's Gecko compositor uses a custom Metal/OpenGL surface chain that SCK doesn't always expose to `SCContentFilter(desktopIndependentWindow:)`. Some Electron/Chromium apps with hardware-accelerated compositors have shown similar behaviour historically.
+
+**Next steps to triage:**
+1. Reproduce against a clean Firefox profile (`firefox -P -no-remote`) to rule out an extension or `gfx.webrender.*` pref.
+2. Try `SCContentFilter(display:including:[window])` instead of `desktopIndependentWindow:` — display-bound filters sometimes work for windows that off-screen composites refuse.
+3. Check Firefox's `browser.tabs.remote.useCrossOriginEmbedderPolicy` and `layers.acceleration.disabled` prefs.
+4. File an Apple Feedback if reproducible against system SCK with no Firefox-side workaround.
+
+**User-facing workaround until fixed:** add a known-issues row in `SETUP.md` pointing users to Safari/Chrome (which capture cleanly) when they need an agent screenshot of a Firefox tab.
