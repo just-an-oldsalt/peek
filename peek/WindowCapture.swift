@@ -15,6 +15,8 @@ enum WindowCaptureError: Error, CustomStringConvertible {
     case permissionDenied
     case windowNotFound(CGWindowID)
     case appNotRunning(String)
+    case displayNotFound(CGDirectDisplayID)
+    case ambiguousDisplay([String])
     case captureFailed(any Error)
     case encodingFailed
     case policyDenied(String)
@@ -27,6 +29,10 @@ enum WindowCaptureError: Error, CustomStringConvertible {
             return "Window \(id) not found"
         case .appNotRunning(let name):
             return "No running app with captureable windows matching '\(name)'"
+        case .displayNotFound(let id):
+            return "Display \(id) not found"
+        case .ambiguousDisplay(let names):
+            return "Ambiguous display name — matches \(names.joined(separator: ", ")). Capture by id instead."
         case .captureFailed(let error):
             return "Capture failed: \(error.localizedDescription)"
         case .encodingFailed:
@@ -140,7 +146,8 @@ enum WindowCapture {
         return try png(from: cgImage)
     }
 
-    private static func png(from cgImage: CGImage) throws -> Data {
+    /// Shared PNG encoder — also used by `DisplayCapture`.
+    static func png(from cgImage: CGImage) throws -> Data {
         let rep = NSBitmapImageRep(cgImage: cgImage)
         rep.size = NSSize(width: cgImage.width, height: cgImage.height)
         guard let data = rep.representation(using: .png, properties: [:]) else {

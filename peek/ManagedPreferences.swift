@@ -65,9 +65,13 @@ struct ManagedPreferences {
     // 1Password / Signal / Slack".
     static var deniedApps: [String]? { stringArray("deniedApps") }
 
-    // Reserved for a future `capture_display` tool. Off by default — whole-
-    // display capture has a wider privacy surface than per-window.
-    static var allowScreenCapture: Bool { bool("allowScreenCapture") ?? false }
+    // Whole-display capture (`capture_display`). Tri-state by design — see
+    // `evaluateDisplayCapture()`. This raw accessor is kept for the Settings
+    // "Managed by Organisation" disclosure; the actual gate is the evaluator.
+    // Note: a missing key is *not* a denial here — unmanaged users fall through
+    // to the per-display approval prompt (gate 2). Only an explicit managed
+    // `false` is a hard policy denial.
+    static var allowScreenCaptureManaged: Bool? { bool("allowScreenCapture") }
 
     // Strip window titles from `list_windows` output. Some titles leak
     // document names (e.g. "Q4 forecast.xlsx").
@@ -104,6 +108,25 @@ struct ManagedPreferences {
                 return .denied("\(appName) is not on your organisation's allowlist")
             }
             return .allowed
+        }
+        return .userControlled
+    }
+
+    /// Resolve whether whole-display capture (`capture_display`) is permitted
+    /// by managed policy before the per-display approval cache is consulted.
+    ///
+    /// Tri-state, deliberately mirroring `evaluate(bundleID:appName:)`:
+    ///   - managed `allowScreenCapture = false` → hard policy denial.
+    ///   - managed `allowScreenCapture = true`  → user-controlled (we still
+    ///     fire the per-display prompt; whole-display capture is higher-surface
+    ///     than per-window, so an admin enabling the capability is not the same
+    ///     as the user consenting to a specific monitor).
+    ///   - key absent (the common, unmanaged case) → user-controlled.
+    ///
+    /// `.allowed` is never returned — display capture always gets gate 2.
+    static func evaluateDisplayCapture() -> AppPolicyDecision {
+        if allowScreenCaptureManaged == false {
+            return .denied("Whole-display capture is disabled by your organisation's policy")
         }
         return .userControlled
     }

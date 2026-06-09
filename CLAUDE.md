@@ -12,9 +12,21 @@ This is the source-of-truth doc for picking up Peek work in any session.
 
 Sibling to **Niacin** (`~/Documents/GIT/niacin`). Same architectural shape, different OS primitive (ScreenCaptureKit instead of `IOPMAssertion`).
 
-## Status — 2026-05-20: 1.0 release candidate
+## Status — 2026-06-07: 1.1 in development
 
-Agent path + trust gates + Settings + Claude Desktop bridge all landed. App-Store-bound manifests in place. Last remaining ship gate is a live Claude Desktop smoke run.
+**1.0 (build 4) shipped — accepted to the App Store.** 1.1 adds multi-display capture
+(`list_displays` / `capture_display` with named monitors + a per-display trust gate),
+the menu-bar capture-flash + icon states, and the live Claude Desktop smoke. See
+`PLAN_1.1.md` for the full plan and `feature/1.1` for the work.
+
+> ⚠️ History note: the accepted build's commit `95c4366` (App Review 5.1.1 neutral-wording
+> fix + build→4) was never pushed to origin; PR #3 merged only up to build 2. `feature/1.1`
+> carries `95c4366` so it reaches `main` when 1.1 lands. Don't branch 1.x off pre-1.1
+> `main` without that commit.
+
+### 1.0 — what landed (2026-05-20)
+
+Agent path + trust gates + Settings + Claude Desktop bridge all landed. App-Store-bound manifests in place.
 
 Done since the 2026-05-15 MVP:
 - **#6 Per-app approval cache** — `AppApprovalStore.swift` (UserDefaults), `AppApprovalPrompt.ask` (NSAlert with Deny / Allow Once / Always Allow), revoke UI in Settings → Trusted Apps.

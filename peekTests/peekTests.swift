@@ -12,6 +12,23 @@ import Foundation
     )
     #expect(WindowCaptureError.encodingFailed.description == "Failed to encode capture as PNG")
     #expect(WindowCaptureError.policyDenied("nope").description == "nope")
+    #expect(WindowCaptureError.displayNotFound(7).description == "Display 7 not found")
+    #expect(
+        WindowCaptureError.ambiguousDisplay(["Studio Display", "Studio Display (2)"]).description
+            == "Ambiguous display name — matches Studio Display, Studio Display (2). Capture by id instead."
+    )
+}
+
+@Test func displayInfoIsValueType() {
+    let a = DisplayInfo(
+        id: 1,
+        name: "Built-in Retina Display",
+        frame: CGRect(x: 0, y: 0, width: 1512, height: 982),
+        isMain: true
+    )
+    let b = a
+    #expect(a == b)
+    #expect(a.hashValue == b.hashValue)
 }
 
 @Test func windowInfoIsValueType() {
@@ -76,6 +93,76 @@ struct ManagedPolicyTests {
             if case .denied = decision {} else {
                 Issue.record("expected denied, got \(decision)")
             }
+        }
+    }
+
+    // §0 tri-state: absent and managed-true both fall through to the per-display
+    // prompt (.userControlled); only an explicit managed-false hard-denies.
+    @Test func displayCaptureAbsentIsUserControlled() {
+        withTempManagedPlist([:]) {
+            #expect(ManagedPreferences.evaluateDisplayCapture() == .userControlled)
+        }
+    }
+
+    @Test func displayCaptureManagedTrueIsUserControlled() {
+        withTempManagedPlist(["allowScreenCapture": true]) {
+            #expect(ManagedPreferences.evaluateDisplayCapture() == .userControlled)
+        }
+    }
+
+    @Test func displayCaptureManagedFalseIsDenied() {
+        withTempManagedPlist(["allowScreenCapture": false]) {
+            if case .denied = ManagedPreferences.evaluateDisplayCapture() {} else {
+                Issue.record("expected denied when allowScreenCapture=false")
+            }
+        }
+    }
+}
+
+// DisplayApprovalStore mutates UserDefaults.standard under "trustedDisplaysV1".
+// Serialized + save/restore so it doesn't race or pollute the real domain.
+@MainActor
+@Suite(.serialized)
+struct DisplayApprovalStoreTests {
+    private static let key = "trustedDisplaysV1"
+
+    private func withCleanDefaults(_ body: (DisplayApprovalStore) -> Void) {
+        let previous = UserDefaults.standard.data(forKey: Self.key)
+        UserDefaults.standard.removeObject(forKey: Self.key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: Self.key) }
+            else { UserDefaults.standard.removeObject(forKey: Self.key) }
+        }
+        body(DisplayApprovalStore())
+    }
+
+    @Test func addAndRevokeRoundTrip() {
+        withCleanDefaults { store in
+            #expect(!store.isAlwaysAllowed(name: "DELL U2720Q"))
+
+            store.allowAlways(name: "DELL U2720Q")
+            #expect(store.isAlwaysAllowed(name: "DELL U2720Q"))
+            // Case-insensitive key.
+            #expect(store.isAlwaysAllowed(name: "dell u2720q"))
+            #expect(store.trusted.count == 1)
+
+            // Persists across a fresh load of the same defaults.
+            let reloaded = DisplayApprovalStore()
+            #expect(reloaded.isAlwaysAllowed(name: "DELL U2720Q"))
+
+            store.revoke(name: "DELL U2720Q")
+            #expect(!store.isAlwaysAllowed(name: "DELL U2720Q"))
+            #expect(store.trusted.isEmpty)
+        }
+    }
+
+    @Test func revokeAllClears() {
+        withCleanDefaults { store in
+            store.allowAlways(name: "Built-in Retina Display")
+            store.allowAlways(name: "LG UltraFine")
+            #expect(store.trusted.count == 2)
+            store.revokeAll()
+            #expect(store.trusted.isEmpty)
         }
     }
 }
