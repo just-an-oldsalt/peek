@@ -38,8 +38,13 @@ Listener bound to `127.0.0.1:11474`, JSON-RPC, bearer token required on every re
 | `peek.list_windows` | `{ app?: string }` | `[{ id, app, title, bounds }, …]` |
 | `peek.capture_window` | `{ id: number }` | MCP `image` content block (base64 PNG) |
 | `peek.capture_app` | `{ name: string }` | Same — convenience: frontmost window of named app |
+| `peek.list_displays` | `{}` | `[{ id, name, frame, is_main }, …]` — monitors by recognizable name (1.1) |
+| `peek.capture_display` | `{ id?: number, name?: string }` | MCP `image` content block — whole display (1.1) |
 
-`peek.capture_screen` (whole display) is on the wall but **not in MVP** — different privacy surface, can be added once the per-app trust UX is solid.
+`capture_display` (whole display) **shipped in 1.1**, gated by managed policy
+(`allowScreenCapture`, tri-state) plus a per-display first-capture approval prompt —
+see "Trust gates" and the MDM table. `list_displays` is ungated (it leaks only geometry
+and monitor names, not pixels).
 
 ### What we deliberately don't expose
 
@@ -73,6 +78,14 @@ Two gates, both light-touch:
 1. **MCP bearer token** — every JSON-RPC request must present `Authorization: Bearer <token>`. Token is generated on first launch, stored in Keychain, surfaced in Settings for the user to copy into Claude Desktop config. Regenerable.
 2. **Per-app first-capture approval** — first time an MCP-driven capture targets a given app bundle ID, surface an approval prompt (NSAlert or floating panel): *"Peek wants to capture <App> for an agent request — Allow / Deny / Always Allow"*. Remember the decision in UserDefaults. Settings UI to view/revoke.
 
+   **Per-display variant (1.1)** — `capture_display` has the same gate-2 shape but keyed
+   by monitor name (sandbox-safe `NSScreen.localizedName`; not `CGDirectDisplayID`, which
+   isn't stable across reboots). Whole-display capture is higher-surface than per-window,
+   so the prompt fires on first capture even when managed policy already permits the
+   capability. Trust lives in `trustedDisplaysV1` UserDefaults; revoke under
+   Settings → Trusted → Displays. The two prompt types share one serializer so a window
+   and a display request can't stack overlapping alerts.
+
 **Deliberately not in v0:**
 - Per-call approval toasts (gets noisy fast)
 - Time-bounded approvals ("allow for the next 10 minutes")
@@ -90,7 +103,7 @@ Standard location: `/Library/Managed Preferences/com.oldsalt.peek.plist`. Keys p
 | `mcpServerEnabled` | Bool | `false` | Whether the loopback MCP listener starts |
 | `allowedApps` | Array of String | *(none)* | Restrict captureable apps to this bundle-ID allowlist |
 | `deniedApps` | Array of String | *(none)* | Always-denied bundle IDs (overrides user approval) |
-| `allowScreenCapture` | Bool | `false` | Whether `peek.capture_screen` (whole display) is permitted at all |
+| `allowScreenCapture` | Bool | *(unset)* | Gates `peek.capture_display`. **Tri-state:** unset → user-controlled (per-display approval prompt decides); `true` → capability enabled, prompt still fires on first capture; `false` → hard policy denial. A missing key is *not* a denial — only an explicit managed `false` blocks it. |
 | `redactWindowTitles` | Bool | `false` | Strip window titles from `list_windows` output (some titles leak document names) |
 | `disableQuit` | Bool | `false` | Remove Quit from the menu bar menu |
 
@@ -116,7 +129,9 @@ These came up during scoping and are explicitly deferred — do not re-introduce
 - **OCR endpoint.** Return pixels; let the LLM read. On-device Vision OCR is a perf optimization, not a feature.
 - **Annotation.** CleanShot owns that space.
 - **Disk persistence.** Default off. May add as opt-in for "audit my agent's captures" workflows.
-- **`peek.capture()` agent-initiated full screen.** Adds different privacy weight than per-window capture; ship per-window first.
+- ~~**`peek.capture()` agent-initiated full screen.**~~ **Shipped in 1.1** as
+  `capture_display` (per-monitor, addressable by name), gated by managed policy + a
+  per-display approval prompt. Per-window shipped first in 1.0, as planned.
 - **Multi-window submenu.** Apps with multiple windows: MVP grabs frontmost. A submenu listing each window is a v2 cut.
 - **Auto-launch closed apps.** "What's in Calculator" when Calculator is closed → MVP returns "not running" rather than starting it.
 

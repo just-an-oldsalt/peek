@@ -12,11 +12,11 @@ Status as of 2026-05-20. **1.0 release candidate.** Agent path end-to-end + trus
 | 4 | ✅ done | Port MCP server scaffold from Niacin |
 | 5 | ✅ done | Implement MCP tools (`list_windows`, `capture_window`, `capture_app`) |
 | 6 | ✅ done | Per-app approval cache (gate 2) — NSAlert + UserDefaults store + revoke UI |
-| 7 | ◐ partial | Menu bar shell with click-to-clipboard capture (multi-window submenu done; capture-flash + NSStatusItem refactor deferred) |
+| 7 | ✅ done (1.1) | Menu bar shell + click-to-clipboard (multi-window submenu + capture-flash done; full NSStatusItem refactor deferred — SwiftUI MenuBarExtra covers the 3 icon states) |
 | 8 | ✅ done | Settings window (MCP / Permissions / Trusted Apps tabs + MDM section) |
 | 9 | ◐ partial | End-to-end smoke — Claude Code path verified, Claude Desktop path pending live human run with `SETUP.md` |
 | 10 | ✅ done | Claude Desktop support via stdio bridge — pinned `mcp-remote@0.1.38` snippet in Settings |
-| 11 | ▢ deferred (1.1) | Display enumeration + per-monitor capture |
+| 11 | ✅ done (1.1) | Display enumeration + per-monitor capture (`list_displays`, `capture_display`, per-display trust gate) |
 | 12 | ▢ investigate | ScreenCaptureKit fails on Firefox windows |
 
 ### 1.0 App Store prep landed
@@ -224,6 +224,15 @@ Calls already made during scoping. Do not re-litigate without a conversation:
 - **No Accessibility entitlement.** Ever. SCK composites occluded pixels for us.
 - **No agent-initiated full-screen capture** (`peek.capture_screen`) in v0 — per-window only.
 - **No OCR endpoint.** Return pixels; let the LLM read.
+- **`allowScreenCapture` is tri-state, not a default-false gate (1.1).** A missing key
+  means *user-controlled* (the per-display approval prompt decides), not denied —
+  otherwise `capture_display` would be dead for every unmanaged App Store user. Only an
+  explicit managed `false` hard-denies. Mirrors how `allowedApps`/`deniedApps` resolve.
+- **Per-display trust is keyed by monitor name (1.1), not `CGDirectDisplayID`.** Display
+  IDs aren't stable across reboots and EDID hashing needs IOKit we avoid under the
+  sandbox. `NSScreen.localizedName` is the stable sandbox-safe key.
+- **Display capture always prompts on first capture (1.1)**, even when policy permits —
+  whole-display is higher-surface than per-window.
 
 ### #12 Investigate: SCK fails on Firefox windows
 

@@ -40,6 +40,8 @@ Peek's MCP server starts on `127.0.0.1:11474` (or the next free port in `11474�
    ```
 3. Restart Claude Code. In a new conversation, ask: *"List the windows Peek can capture."* You should see `mcp__peek__list_windows` invoked and the result returned.
 
+**Per-project shortcut:** instead of editing your global config, use **Settings → MCP → Save .mcp.json to a project…** to drop a ready-to-use `.mcp.json` (with your token) into a project folder. Claude Code reads it automatically when launched there. ⚠️ That file contains your bearer token — add `.mcp.json` to the project's `.gitignore`; never commit it. Rotate the token from **Settings → MCP** if it ever leaks.
+
 ### Claude Desktop
 
 Claude Desktop doesn't accept the streamable-HTTP `url` shape yet, so Peek ships a stdio bridge via the pinned `mcp-remote` package (fetched on launch by `npx`).
@@ -66,8 +68,9 @@ Claude Desktop doesn't accept the streamable-HTTP `url` shape yet, so Peek ships
      }
    }
    ```
-4. **Quit and relaunch Claude Desktop**. Look for the 🔧 icon in the chat input — Peek's three tools (`list_windows`, `capture_window`, `capture_app`) should appear.
+4. **Quit and relaunch Claude Desktop**. Look for the 🔧 icon in the chat input — Peek's five tools (`list_windows`, `capture_window`, `capture_app`, `list_displays`, `capture_display`) should appear.
 5. Try: *"What's currently displayed in my Calculator app?"* Claude will call `capture_app`, Peek will surface an **Allow** prompt the first time, and the screenshot will be passed back to Claude.
+6. For whole-monitor capture (1.1), try: *"What's on my Built-in Retina Display?"* Claude calls `list_displays` to find it by name, then `capture_display`. Peek pops a separate per-display approval prompt the first time.
 
 ## 4. Per-app approval prompts
 
@@ -77,10 +80,16 @@ The first time an agent asks to capture a given app, Peek pops a system alert:
 > [Deny] [Allow Once] [Always Allow]
 
 - **Allow Once** — proceed but re-prompt next time.
-- **Always Allow** — proceed and add the app to your trusted list. Manage / revoke from **Settings → Trusted Apps**.
+- **Always Allow** — proceed and add the app to your trusted list. Manage / revoke from **Settings → Trusted → Apps**.
 - **Deny** — return a policy error to the agent for this call.
 
 The bearer token (gate 1) proves the request came from a paired client. The approval prompt (gate 2) proves *you* consent to that client capturing this specific app.
+
+**Whole-display capture (1.1)** uses the same two gates with a separate per-display prompt
+(*"Allow agent to capture the … display?"*), since a full screen can expose notifications
+and panels from any app. Trusted displays are managed under **Settings → Trusted →
+Displays**. Organisations can disable display capture entirely with the `allowScreenCapture`
+managed preference set to `false`.
 
 ## Troubleshooting
 
