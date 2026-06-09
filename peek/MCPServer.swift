@@ -32,6 +32,12 @@ protocol MCPDelegate: AnyObject {
     /// JSON-RPC tool descriptors for `tools/list`. Return [] if no tools are exposed.
     func mcpToolDefinitions() -> [JSONValue]
 
+    /// Optional server-level description returned in the `initialize` result's
+    /// `instructions` field. Clients (Claude Desktop / Code) surface this to the
+    /// model so it understands what the server is for and how its trust gates
+    /// behave. Return nil to omit the field.
+    func mcpInstructions() -> String?
+
     /// Invoke a tool by name. Throw `MCPToolError` for protocol-meaningful failures;
     /// any other thrown error is reported as `-32603 internal error`.
     func mcpCallTool(name: String, args: [String: JSONValue]) async throws -> JSONValue
@@ -259,14 +265,18 @@ final class MCPServer {
         let id = envelope.id
         switch envelope.method {
         case "initialize":
-            return jsonRPCSuccess(id: id, result: .object([
+            var result: [String: JSONValue] = [
                 "protocolVersion": .string("2024-11-05"),
                 "capabilities": .object(["tools": .object([:])]),
                 "serverInfo": .object([
                     "name": .string("peek"),
                     "version": .string(appVersion()),
                 ]),
-            ]))
+            ]
+            if let instructions = delegate?.mcpInstructions(), !instructions.isEmpty {
+                result["instructions"] = .string(instructions)
+            }
+            return jsonRPCSuccess(id: id, result: .object(result))
         case "notifications/initialized", "ping":
             return jsonRPCSuccess(id: id, result: .object([:]))
         case "tools/list":

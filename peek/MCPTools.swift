@@ -4,16 +4,52 @@ import CoreGraphics
 @MainActor
 final class PeekMCPDelegate: MCPDelegate {
     private let approvals: AppApprovalStore
+    private let displayApprovals: DisplayApprovalStore
 
-    init(approvals: AppApprovalStore) {
+    init(approvals: AppApprovalStore, displayApprovals: DisplayApprovalStore) {
         self.approvals = approvals
+        self.displayApprovals = displayApprovals
+    }
+
+    func mcpInstructions() -> String? {
+        """
+        Peek captures the pixels of on-screen app windows and whole displays on \
+        this Mac and returns them as PNG images, so you can see what the user is \
+        looking at without them screenshotting and pasting.
+
+        All capture is local — the server is bound to loopback and nothing leaves \
+        the device. Peek never moves, raises, or interacts with windows; it only reads pixels.
+
+        Trust model: the first capture targeting a given app or display shows the \
+        user a local "Allow Once / Always Allow / Deny" prompt. If the user denies \
+        (or an organisation policy blocks it), the call returns an error — relay \
+        that to the user rather than retrying in a loop.
+
+        Typical flow: call list_windows or list_displays to discover targets, then \
+        capture_window / capture_app / capture_display. Window titles and display \
+        names (e.g. "Built-in Retina Display") are human-recognizable and safe to \
+        reference back to the user.
+        """
+    }
+
+    /// Annotations shared by every Peek tool: all are read-only screen reads —
+    /// never destructive, safe to retry, loopback-only (no external world).
+    /// Honored by clients on the 2025-03-26+ spec; older clients ignore them.
+    private var readOnlyAnnotations: JSONValue {
+        .object([
+            "readOnlyHint": .bool(true),
+            "destructiveHint": .bool(false),
+            "idempotentHint": .bool(true),
+            "openWorldHint": .bool(false),
+        ])
     }
 
     func mcpToolDefinitions() -> [JSONValue] {
         [
             .object([
                 "name": .string("list_windows"),
-                "description": .string("List captureable windows. Returns id, owning app, window title, and bounds. Optionally filter by app name or bundle identifier."),
+                "description": .string("List captureable windows. Returns id, owning app, window title, and bounds. Optionally filter by app name or bundle identifier. Read-only; does not trigger an approval prompt."),
+                "annotations": readOnlyAnnotations,
                 "inputSchema": .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -26,7 +62,8 @@ final class PeekMCPDelegate: MCPDelegate {
             ]),
             .object([
                 "name": .string("capture_window"),
-                "description": .string("Capture a specific window by id (as returned by list_windows) and return its pixels as a PNG. Captures occluded windows without raising them."),
+                "description": .string("Capture a specific window by id (as returned by list_windows) and return its pixels as a PNG. Captures occluded windows without raising them. The first capture of a given app prompts the user (Allow Once / Always Allow / Deny); a denied capture returns an error — surface it, don't retry."),
+                "annotations": readOnlyAnnotations,
                 "inputSchema": .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -40,7 +77,8 @@ final class PeekMCPDelegate: MCPDelegate {
             ]),
             .object([
                 "name": .string("capture_app"),
-                "description": .string("Capture the frontmost captureable window of the named app and return its pixels as a PNG. Convenience for 'show me what's in <app>' without first listing."),
+                "description": .string("Capture the frontmost captureable window of the named app and return its pixels as a PNG. Convenience for 'show me what's in <app>' without first listing. The first capture of a given app prompts the user (Allow Once / Always Allow / Deny); a denied capture returns an error — surface it, don't retry."),
+                "annotations": readOnlyAnnotations,
                 "inputSchema": .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -50,6 +88,33 @@ final class PeekMCPDelegate: MCPDelegate {
                         ]),
                     ]),
                     "required": .array([.string("name")]),
+                ]),
+            ]),
+            .object([
+                "name": .string("list_displays"),
+                "description": .string("List connected displays (monitors) by human-recognizable name. Returns id, name (e.g. \"Built-in Retina Display\", \"DELL U2720Q\"), bounds, and whether it is the main display. Use to address a display by name in capture_display. Read-only; does not trigger an approval prompt."),
+                "annotations": readOnlyAnnotations,
+                "inputSchema": .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                ]),
+            ]),
+            .object([
+                "name": .string("capture_display"),
+                "description": .string("Capture an entire display (monitor) and return its pixels as a PNG. Identify the display by 'id' (from list_displays) or by 'name' (case-insensitive substring of the display's name). A whole-display capture composites every window on that screen, so it can include other apps' notifications and panels. The first capture of a given display prompts the user (Allow Once / Always Allow / Deny); a denied capture returns an error — surface it, don't retry."),
+                "annotations": readOnlyAnnotations,
+                "inputSchema": .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "id": .object([
+                            "type": .string("integer"),
+                            "description": .string("CGDirectDisplayID from list_displays."),
+                        ]),
+                        "name": .object([
+                            "type": .string("string"),
+                            "description": .string("Display name or a case-insensitive substring of it (e.g. \"Dell\"). Ambiguous matches are rejected — use id."),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]
@@ -63,6 +128,8 @@ final class PeekMCPDelegate: MCPDelegate {
         case "list_windows": return try await callListWindows(args: args)
         case "capture_window": return try await callCaptureWindow(args: args)
         case "capture_app": return try await callCaptureApp(args: args)
+        case "list_displays": return try await callListDisplays(args: args)
+        case "capture_display": return try await callCaptureDisplay(args: args)
         default: throw MCPToolError.unknownTool(name)
         }
     }
@@ -153,6 +220,76 @@ final class PeekMCPDelegate: MCPDelegate {
         return try await captureResolved(info)
     }
 
+    // MARK: - Display tools
+
+    private func callListDisplays(args: [String: JSONValue]) async throws -> JSONValue {
+        let displays: [DisplayInfo]
+        do {
+            displays = try await DisplayCapture.listDisplays()
+        } catch let err as WindowCaptureError {
+            throw MCPToolError.internalError(err.description)
+        }
+
+        let text = displays.isEmpty
+            ? "No displays found."
+            : displays.map { d in
+                "[\(d.id)] \(d.name)\(d.isMain ? " (main)" : "") \(Int(d.frame.width))×\(Int(d.frame.height))"
+            }.joined(separator: "\n")
+
+        let structured: JSONValue = .array(displays.map { d in
+            .object([
+                "id": .int(Int(d.id)),
+                "name": .string(d.name),
+                "is_main": .bool(d.isMain),
+                "frame": .object([
+                    "x": .double(Double(d.frame.minX)),
+                    "y": .double(Double(d.frame.minY)),
+                    "width": .double(Double(d.frame.width)),
+                    "height": .double(Double(d.frame.height)),
+                ]),
+            ])
+        })
+
+        return .object([
+            "content": .array([.object([
+                "type": .string("text"),
+                "text": .string(text),
+            ])]),
+            "structuredContent": .object(["displays": structured]),
+        ])
+    }
+
+    private func callCaptureDisplay(args: [String: JSONValue]) async throws -> JSONValue {
+        let info: DisplayInfo
+        do {
+            if let id = intArg(args["id"]) {
+                info = try await DisplayCapture.resolveDisplay(id: CGDirectDisplayID(id))
+            } else if case .string(let name) = args["name"] ?? .null, !name.isEmpty {
+                info = try await DisplayCapture.resolveDisplay(name: name)
+            } else {
+                throw MCPToolError.invalidArguments("capture_display requires 'id' (integer) or non-empty 'name'")
+            }
+        } catch let err as WindowCaptureError {
+            // Ambiguous / not-found are argument problems the agent can correct.
+            switch err {
+            case .ambiguousDisplay, .displayNotFound:
+                throw MCPToolError.invalidArguments(err.description)
+            default:
+                throw MCPToolError.internalError(err.description)
+            }
+        }
+
+        try await requireDisplayApproval(for: info)
+
+        let data: Data
+        do {
+            data = try await DisplayCapture.captureDisplay(id: info.id)
+        } catch let err as WindowCaptureError {
+            throw MCPToolError.internalError(err.description)
+        }
+        return imageResponse(png: data)
+    }
+
     // MARK: - Approval + capture helpers
 
     /// Canonical policy-denial string. Don't differentiate between
@@ -193,6 +330,36 @@ final class PeekMCPDelegate: MCPDelegate {
         }
     }
 
+    /// Gate 2 for whole-display capture. Managed policy first
+    /// (`evaluateDisplayCapture` — only an explicit managed `false` hard-denies),
+    /// then the per-display approval cache + prompt. Always prompts on first
+    /// capture of a display, even when policy permits — display capture is
+    /// higher-surface than per-window.
+    private func requireDisplayApproval(for info: DisplayInfo) async throws {
+        switch ManagedPreferences.evaluateDisplayCapture() {
+        case .denied:
+            throw MCPToolError.internalError(Self.policyDeniedMessage)
+        case .allowed:
+            return
+        case .userControlled:
+            break
+        }
+
+        if displayApprovals.isAlwaysAllowed(name: info.name) {
+            return
+        }
+
+        let decision = await DisplayApprovalPrompt.ask(displayName: info.name)
+        switch decision {
+        case .allowAlways:
+            displayApprovals.allowAlways(name: info.name)
+        case .allowOnce:
+            break
+        case .deny:
+            throw MCPToolError.internalError("User denied capture of \(info.name) display")
+        }
+    }
+
     private func captureResolved(_ info: WindowInfo) async throws -> JSONValue {
         let data: Data
         do {
@@ -204,6 +371,9 @@ final class PeekMCPDelegate: MCPDelegate {
     }
 
     private func imageResponse(png: Data) -> JSONValue {
+        // Confirm the agent-driven capture in the menu bar, same as the
+        // click-to-clipboard path. Both delegate and AppState are @MainActor.
+        AppState.shared.flashCapture()
         let base64 = png.base64EncodedString()
         return .object([
             "content": .array([.object([

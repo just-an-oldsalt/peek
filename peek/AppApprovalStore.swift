@@ -120,53 +120,49 @@ final class AppApprovalStore: ObservableObject {
 
 // MARK: - Prompt UI
 
-/// Shows a modal NSAlert asking the user whether to let an agent capture
-/// `appName`. Must be called on the main actor.
+/// Serializes capture-approval NSAlerts across the whole app. Each enqueued
+/// prompt chains behind the previous in-flight one, so two MCP requests racing
+/// for capture (a window and a display, or two different bundles) produce
+/// sequential prompts rather than stacked NSAlerts the user must dismiss in the
+/// right order. `runModal()` spins a nested run loop, which is why naive
+/// `@MainActor` isolation alone is insufficient to enforce this serialization.
 ///
-/// Concurrent callers are serialized: each `ask` chains behind the previous
-/// in-flight prompt's continuation, so two MCP requests racing for capture
-/// of different bundles produce two sequential prompts rather than two
-/// stacked NSAlerts the user has to dismiss in the right order. Note that
-/// `runModal()` spins a nested run loop, which is why naive `@MainActor`
-/// isolation alone is insufficient to enforce this serialization.
+/// Shared by `AppApprovalPrompt` (per-app, gate 2) and `DisplayApprovalPrompt`
+/// (per-display) — see `DisplayApprovalStore.swift`.
 @MainActor
-enum AppApprovalPrompt {
-    /// Tail of the prompt queue. Each new `ask` chains behind this task's
+enum ApprovalPromptQueue {
+    /// Tail of the prompt queue. Each new prompt chains behind this task's
     /// completion before showing its own modal, then becomes the new tail.
     private static var serializer: Task<Void, Never> = Task {}
 
-    static func ask(appName: String, bundleID: String) async -> AppApprovalDecision {
+    /// Hard upper bound on any displayed string. Sandbox doesn't prevent an app
+    /// (or a monitor) from publishing a name the length of a novel; without a
+    /// clamp, that would render an alert taller than the screen.
+    static let maxDisplayChars = 120
+
+    /// Enqueue a modal builder. `body` runs on the main actor once all prior
+    /// prompts have resolved, and must call `alert.runModal()` itself.
+    static func enqueue(_ body: @escaping @MainActor () -> AppApprovalDecision) async -> AppApprovalDecision {
         let predecessor = serializer
         let mine = Task { @MainActor () -> AppApprovalDecision in
             _ = await predecessor.value
-            return runModal(appName: appName, bundleID: bundleID)
+            return body()
         }
         serializer = Task { @MainActor in _ = await mine.value }
         return await mine.value
     }
 
-    /// Hard upper bound on the displayed app name. Sandbox doesn't prevent
-    /// an app from publishing a CFBundleName the length of a novel; without
-    /// a clamp, that would render an alert taller than the screen.
-    private static let maxDisplayChars = 120
+    static func clamp(_ s: String) -> String {
+        s.count <= maxDisplayChars ? s : String(s.prefix(maxDisplayChars)) + "…"
+    }
 
-    private static func runModal(appName: String, bundleID: String) -> AppApprovalDecision {
-        let safeName = clamp(appName)
-        let safeBundle = clamp(bundleID)
-
+    /// Builds and runs a three-button (Deny / Allow Once / Always Allow) alert.
+    /// Caller supplies the copy; this owns the button mapping + activation.
+    static func runModal(messageText: String, informativeText: String) -> AppApprovalDecision {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Allow agent to capture \(safeName)?"
-        alert.informativeText = """
-            An AI agent connected to Peek is asking to capture the contents \
-            of \(safeName).
-
-            Bundle ID: \(safeBundle)
-
-            Choose Allow Once to permit just this capture, or Always Allow \
-            to skip this prompt for \(safeName) in the future. You can revoke \
-            trusted apps from Peek → Settings → Trusted Apps.
-            """
+        alert.messageText = messageText
+        alert.informativeText = informativeText
         alert.addButton(withTitle: "Deny")
         alert.addButton(withTitle: "Allow Once")
         alert.addButton(withTitle: "Always Allow")
@@ -182,8 +178,28 @@ enum AppApprovalPrompt {
         default:                       return .deny
         }
     }
+}
 
-    private static func clamp(_ s: String) -> String {
-        s.count <= maxDisplayChars ? s : String(s.prefix(maxDisplayChars)) + "…"
+/// Per-app capture approval prompt (gate 2). Must be called on the main actor.
+@MainActor
+enum AppApprovalPrompt {
+    static func ask(appName: String, bundleID: String) async -> AppApprovalDecision {
+        let safeName = ApprovalPromptQueue.clamp(appName)
+        let safeBundle = ApprovalPromptQueue.clamp(bundleID)
+        return await ApprovalPromptQueue.enqueue {
+            ApprovalPromptQueue.runModal(
+                messageText: "Allow agent to capture \(safeName)?",
+                informativeText: """
+                    An AI agent connected to Peek is asking to capture the contents \
+                    of \(safeName).
+
+                    Bundle ID: \(safeBundle)
+
+                    Choose Allow Once to permit just this capture, or Always Allow \
+                    to skip this prompt for \(safeName) in the future. You can revoke \
+                    trusted apps from Peek → Settings → Trusted.
+                    """
+            )
+        }
     }
 }

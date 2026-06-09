@@ -62,6 +62,7 @@ struct PeekApp: App {
             SettingsView()
                 .environmentObject(app)
                 .environmentObject(app.approvals)
+                .environmentObject(app.displayApprovals)
         }
 
         Window("About Peek", id: "about") {
@@ -80,7 +81,20 @@ private struct MenuBarLabel: View {
         // which made the menu bar icon invisible whenever Screen Recording
         // wasn't granted (e.g. a fresh install). That blank icon was the root
         // cause of the App Review 2.1a "no UI on launch" rejection.
-        Image(systemName: app.permissionGranted ? "viewfinder" : "viewfinder.trianglebadge.exclamationmark")
+        //
+        // Three steady states + a transient capture flash:
+        //   - permission missing → viewfinder + warning badge
+        //   - MCP listening      → filled viewfinder (reads as "active")
+        //   - idle (granted)     → outline viewfinder
+        //   - just captured      → checkmark flash for ~0.6s (any capture path)
+        Image(systemName: symbolName)
+            .symbolVariant(app.captureFlash || app.mcpRunning ? .fill : .none)
+    }
+
+    private var symbolName: String {
+        if app.captureFlash { return "checkmark.circle" }
+        if !app.permissionGranted { return "viewfinder.trianglebadge.exclamationmark" }
+        return "viewfinder"
     }
 }
 
@@ -99,6 +113,7 @@ final class AppState: ObservableObject {
     @Published private(set) var status: String?
     @Published private(set) var isRefreshing = false
     @Published private(set) var permissionGranted = ScreenRecordingPermission.isGranted
+    @Published private(set) var captureFlash = false
 
     @Published private(set) var mcpPort: UInt16?
     @Published private(set) var mcpToken: String?
@@ -106,12 +121,15 @@ final class AppState: ObservableObject {
     @Published private(set) var mcpRunning = false
 
     let approvals = AppApprovalStore()
+    let displayApprovals = DisplayApprovalStore()
     private let server: MCPServer
     private let mcpDelegate: PeekMCPDelegate
 
     private init() {
-        let approvals = self.approvals
-        let delegate = PeekMCPDelegate(approvals: approvals)
+        let delegate = PeekMCPDelegate(
+            approvals: self.approvals,
+            displayApprovals: self.displayApprovals
+        )
         self.mcpDelegate = delegate
         self.server = MCPServer()
         server.setDelegate(delegate)
@@ -164,14 +182,12 @@ final class AppState: ObservableObject {
         status = "MCP token copied to clipboard"
     }
 
-    /// Streamable-HTTP MCP config — works directly with Claude Code, Cursor,
-    /// and other clients that support the HTTP transport.
-    func copyClaudeCodeConfig() {
-        guard let token = mcpToken, let port = mcpPort else {
-            status = "MCP config not ready"
-            return
-        }
-        let snippet = """
+    /// Streamable-HTTP MCP config JSON — works directly with Claude Code,
+    /// Cursor, and other clients that support the HTTP transport. This is also
+    /// the exact `.mcp.json` shape Claude Code reads from a project root.
+    private func claudeCodeConfigJSON() -> String? {
+        guard let token = mcpToken, let port = mcpPort else { return nil }
+        return """
         {
           "mcpServers": {
             "peek": {
@@ -183,10 +199,42 @@ final class AppState: ObservableObject {
           }
         }
         """
+    }
+
+    func copyClaudeCodeConfig() {
+        guard let snippet = claudeCodeConfigJSON() else {
+            status = "MCP config not ready"
+            return
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(snippet, forType: .string)
         status = "Config copied for Claude Code"
+    }
+
+    /// Write a ready-to-use `.mcp.json` (with the live token) to a folder the
+    /// user picks. The NSSavePanel grants sandbox write access to the chosen
+    /// path via powerbox — no extra entitlement needed. The file carries the
+    /// bearer token, so the panel warns against committing it.
+    func saveClaudeCodeConfigFile() {
+        guard let snippet = claudeCodeConfigJSON() else {
+            status = "MCP config not ready"
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Save Claude Code MCP config"
+        panel.message = "Saves .mcp.json into a project folder so Claude Code picks up Peek there. It contains your bearer token — add it to .gitignore; don't commit it."
+        panel.nameFieldStringValue = ".mcp.json"
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try Data(snippet.utf8).write(to: url)
+            status = "Saved \(url.lastPathComponent) to \(url.deletingLastPathComponent().path)"
+        } catch {
+            status = "Save failed: \(error.localizedDescription)"
+        }
     }
 
     /// stdio-via-mcp-remote bridge — required for Claude Desktop, which
@@ -323,8 +371,20 @@ final class AppState: ObservableObject {
             pb.clearContents()
             pb.setData(data, forType: .png)
             status = "Copied \(entry.name) (\(data.count / 1024) KB)"
+            flashCapture()
         } catch {
             status = "Capture failed: \(error)"
+        }
+    }
+
+    /// Briefly swaps the menu-bar icon to a checkmark to confirm a capture
+    /// happened — for both the click-to-clipboard path and agent-driven MCP
+    /// captures (called by `PeekMCPDelegate` on success). Self-clears.
+    func flashCapture() {
+        captureFlash = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.6))
+            captureFlash = false
         }
     }
 }

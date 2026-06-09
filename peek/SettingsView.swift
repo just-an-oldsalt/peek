@@ -4,6 +4,7 @@ import AppKit
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var approvals: AppApprovalStore
+    @EnvironmentObject private var displayApprovals: DisplayApprovalStore
 
     @AppStorage("mcpServerEnabled") private var mcpServerEnabledUserDefault: Bool = true
 
@@ -24,8 +25,8 @@ struct SettingsView: View {
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
                 .tag(SettingsTab.permissions)
 
-            TrustedAppsTab(approvals: approvals)
-                .tabItem { Label("Trusted Apps", systemImage: "checkmark.shield") }
+            TrustedTab(approvals: approvals, displayApprovals: displayApprovals)
+                .tabItem { Label("Trusted", systemImage: "checkmark.shield") }
                 .tag(SettingsTab.trusted)
         }
         .frame(width: 480, height: 460)
@@ -85,7 +86,12 @@ private struct McpSettingsTab: View {
                 }
                 .disabled(app.mcpToken == nil || app.mcpPort == nil)
 
-                Text("Claude Desktop uses a pinned `mcp-remote@\(AppState.mcpRemoteVersionPin)` bridge fetched via npx. Claude Code reads the loopback URL directly.")
+                Button("Save .mcp.json to a project…") {
+                    app.saveClaudeCodeConfigFile()
+                }
+                .disabled(app.mcpToken == nil || app.mcpPort == nil)
+
+                Text("Claude Desktop uses a pinned `mcp-remote@\(AppState.mcpRemoteVersionPin)` bridge fetched via npx. Claude Code reads the loopback URL directly, or from a `.mcp.json` in a project folder. That file holds your token — keep it out of version control.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -135,6 +141,10 @@ private struct McpSettingsTab: View {
                         PolicyRow("Capture denylist (\(denied.count) bundle IDs)",
                                   icon: "nosign", tint: .secondary)
                     }
+                    if ManagedPreferences.allowScreenCaptureManaged == false {
+                        PolicyRow("Whole-display capture disabled by policy",
+                                  icon: "display.trianglebadge.exclamationmark", tint: .orange)
+                    }
                     if ManagedPreferences.redactWindowTitles {
                         PolicyRow("Window titles redacted in tool output",
                                   icon: "eye.slash", tint: .secondary)
@@ -154,6 +164,7 @@ private struct McpSettingsTab: View {
             || ManagedPreferences.mcpServerEnabled != nil
             || ManagedPreferences.allowedApps != nil
             || ManagedPreferences.deniedApps != nil
+            || ManagedPreferences.allowScreenCaptureManaged == false
             || ManagedPreferences.redactWindowTitles
             || ManagedPreferences.disableQuit
     }
@@ -215,9 +226,45 @@ private struct PermissionsTab: View {
     }
 }
 
-// MARK: - Trusted apps tab
+// MARK: - Trusted tab (apps + displays)
 
-private struct TrustedAppsTab: View {
+private struct TrustedTab: View {
+    @ObservedObject var approvals: AppApprovalStore
+    @ObservedObject var displayApprovals: DisplayApprovalStore
+
+    enum Kind: Hashable { case apps, displays }
+    @State private var kind: Kind = .apps
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Picker("", selection: $kind) {
+                Text("Apps").tag(Kind.apps)
+                Text("Displays").tag(Kind.displays)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding([.horizontal, .top], 16)
+            .padding(.bottom, 4)
+
+            switch kind {
+            case .apps:     TrustedAppsList(approvals: approvals)
+            case .displays: TrustedDisplaysList(displayApprovals: displayApprovals)
+            }
+
+            if ManagedPreferences.allowScreenCaptureManaged == false {
+                Divider()
+                Label("Whole-display capture is disabled by your organisation's policy",
+                      systemImage: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding([.horizontal, .bottom], 16)
+                    .padding(.top, 8)
+            }
+        }
+    }
+}
+
+private struct TrustedAppsList: View {
     @ObservedObject var approvals: AppApprovalStore
     @State private var selection: TrustedApp.ID?
 
@@ -227,8 +274,8 @@ private struct TrustedAppsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding([.horizontal, .top], 16)
-                .padding(.bottom, 8)
+                .padding([.horizontal], 16)
+                .padding(.vertical, 8)
 
             if approvals.trusted.isEmpty {
                 ContentUnavailableView(
@@ -271,6 +318,61 @@ private struct TrustedAppsTab: View {
                     selection = nil
                 }
                 .disabled(approvals.trusted.isEmpty)
+            }
+            .padding(16)
+        }
+    }
+}
+
+private struct TrustedDisplaysList: View {
+    @ObservedObject var displayApprovals: DisplayApprovalStore
+    @State private var selection: TrustedDisplay.ID?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Agents can capture these whole displays without re-prompting. Approvals are added when you tap **Always Allow** on a display-capture prompt.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding([.horizontal], 16)
+                .padding(.vertical, 8)
+
+            if displayApprovals.trusted.isEmpty {
+                ContentUnavailableView(
+                    "No Trusted Displays",
+                    systemImage: "display",
+                    description: Text("Displays you grant **Always Allow** will appear here.")
+                )
+                .padding()
+            } else {
+                Table(displayApprovals.trusted, selection: $selection) {
+                    TableColumn("Display") { entry in
+                        Text(entry.name)
+                    }
+                    TableColumn("Approved") { entry in
+                        Text(entry.firstApprovedAt, style: .date)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .width(min: 80, ideal: 100)
+                }
+                .padding(.horizontal, 16)
+            }
+
+            HStack {
+                Button("Revoke", role: .destructive) {
+                    if let id = selection { displayApprovals.revoke(name: id) }
+                    selection = nil
+                }
+                .disabled(selection == nil)
+
+                Spacer()
+
+                Button("Revoke All") {
+                    displayApprovals.revokeAll()
+                    selection = nil
+                }
+                .disabled(displayApprovals.trusted.isEmpty)
             }
             .padding(16)
         }
