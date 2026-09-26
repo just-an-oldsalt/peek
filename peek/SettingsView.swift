@@ -42,6 +42,21 @@ private struct McpSettingsTab: View {
 
     var body: some View {
         Form {
+            Section("Startup") {
+                ManagedToggle(
+                    title: "Launch Peek at login",
+                    isOn: Binding(
+                        get: { app.launchAtLogin },
+                        set: { app.setLaunchAtLogin($0) }
+                    ),
+                    managed: ManagedPreferences.launchAtLogin
+                )
+                Text("Peek only answers MCP calls while it is running — without this, an agent's first capture after a reboot fails until you open Peek by hand.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("MCP Server") {
                 ManagedToggle(
                     title: "Run local MCP server",
@@ -152,6 +167,11 @@ private struct McpSettingsTab: View {
                     if ManagedPreferences.disableQuit {
                         PolicyRow("Quit disabled by policy", icon: "lock.fill", tint: .orange)
                     }
+                    if let managed = ManagedPreferences.launchAtLogin {
+                        PolicyRow(managed ? "Launch at login enforced by policy"
+                                          : "Launch at login blocked by policy",
+                                  icon: "lock.fill", tint: .orange)
+                    }
                 }
             }
         }
@@ -167,6 +187,7 @@ private struct McpSettingsTab: View {
             || ManagedPreferences.allowScreenCaptureManaged == false
             || ManagedPreferences.redactWindowTitles
             || ManagedPreferences.disableQuit
+            || ManagedPreferences.launchAtLogin != nil
     }
 
     private func flash(_ key: String) {

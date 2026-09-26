@@ -8,6 +8,11 @@ Download the latest `peek-X.Y.dmg` from [GitHub Releases](https://github.com/jus
 
 You'll see a viewfinder icon (⌖) appear in the menu bar. If the icon has a slash through it, Peek is waiting on Screen Recording permission — see step 2.
 
+Peek adds itself to your login items the first time it runs, so it's already
+listening when an agent asks for a capture after a reboot. Turn it off any time
+in Settings → MCP → Startup (or System Settings → General → Login Items) — once
+you switch it off it stays off.
+
 ## 2. Grant Screen Recording
 
 Peek uses ScreenCaptureKit to read window pixels. macOS requires Screen Recording consent for that, even though Peek never raises or moves the windows it reads.

@@ -120,6 +120,8 @@ final class AppState: ObservableObject {
     @Published private(set) var mcpError: String?
     @Published private(set) var mcpRunning = false
 
+    @Published private(set) var launchAtLogin: Bool = LaunchAtLogin.isEnabled
+
     let approvals = AppApprovalStore()
     let displayApprovals = DisplayApprovalStore()
     private let server: MCPServer
@@ -134,6 +136,45 @@ final class AppState: ObservableObject {
         self.server = MCPServer()
         server.setDelegate(delegate)
         bootstrapMCP()
+        bootstrapLaunchAtLogin()
+    }
+
+    /// Settle the login-item state at startup.
+    ///
+    /// **Peek never enrols itself here.** App Review 2.4.5(iii) rejected 1.2
+    /// build 7 for registering a login item on first run: that reads as
+    /// auto-launching without user consent, however useful it is. The only
+    /// startup-time action left is enforcing an MDM pin, which is the device
+    /// owner's decision rather than Peek's. The user's own opt-in lives in the
+    /// Welcome window and Settings → MCP → Startup.
+    private func bootstrapLaunchAtLogin() {
+        // Never mutate login items from a test host — that would enrol the
+        // developer's machine in a login item pointing at DerivedData. On an
+        // MDM-managed dev machine the enforcement below would otherwise
+        // register/unregister on every `xcodebuild test`.
+        guard !LaunchAtLogin.isRunningUnderTests else {
+            launchAtLogin = LaunchAtLogin.isEnabled
+            return
+        }
+
+        if let managed = ManagedPreferences.launchAtLogin,
+           managed != LaunchAtLogin.isEnabled {
+            setLaunchAtLogin(managed)
+        }
+        launchAtLogin = LaunchAtLogin.isEnabled
+    }
+
+    /// Register/unregister the login item and refresh the published state from
+    /// `SMAppService` rather than from `on` — the request can fail (or be
+    /// undone by the user in System Settings → General → Login Items), and the
+    /// UI should show what is actually true.
+    func setLaunchAtLogin(_ on: Bool) {
+        do {
+            try LaunchAtLogin.set(on)
+        } catch {
+            status = "Couldn't \(on ? "enable" : "disable") launch at login: \(error.localizedDescription)"
+        }
+        launchAtLogin = LaunchAtLogin.isEnabled
     }
 
     private func bootstrapMCP() {
@@ -348,6 +389,10 @@ final class AppState: ObservableObject {
     /// Welcome window reflect a grant the user just made in System Settings
     /// without requiring a manual Refresh.
     func refreshPermission() async {
+        // Same rationale for the login item: the user can flip it in System
+        // Settings → General → Login Items behind our back.
+        launchAtLogin = LaunchAtLogin.isEnabled
+
         let granted = ScreenRecordingPermission.isGranted
         guard granted != permissionGranted else { return }
         permissionGranted = granted
@@ -500,6 +545,10 @@ final class WelcomeWindowController {
 
 private struct WelcomeView: View {
     let onDismiss: () -> Void
+
+    /// Mirrors the real login-item state at the moment the window opens. On a
+    /// fresh install that is always `false`, so the box renders unticked.
+    @State private var startAtLogin = LaunchAtLogin.isEnabled
     // Observe the shared state rather than snapshotting consent on init, so the
     // window flips from "needs permission" to "enabled" live when the user grants
     // it in System Settings and returns (see AppDelegate.applicationDidBecomeActive).
@@ -529,6 +578,8 @@ private struct WelcomeView: View {
 
             permissionSection
 
+            launchAtLoginSection
+
             Text("Peek also runs a local, bearer-authenticated MCP server on 127.0.0.1 so AI agents can request a window capture on demand. Manage it under Settings → MCP.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -546,6 +597,36 @@ private struct WelcomeView: View {
         }
         .padding(28)
         .frame(width: 380)
+    }
+
+    /// Opt-in, unticked. The tick *is* the consent — Peek never registers a
+    /// login item on its own (App Review 2.4.5(iii) rejected 1.2 build 7 for
+    /// exactly that). Hidden when an MDM profile pins the value, because then
+    /// it isn't the user's choice to make; Settings shows the policy instead.
+    ///
+    /// Deliberately `@State` + `onChange` rather than a `Binding(get:set:)`
+    /// wired into `AppState`. With a custom binding, SwiftUI called the setter
+    /// while merely laying this window out — registering the login item with no
+    /// user interaction at all, which is the same violation just moved from
+    /// startup into the window. SwiftUI never mutates `@State` on its own, so
+    /// `onChange` can only fire from an actual click.
+    @ViewBuilder
+    private var launchAtLoginSection: some View {
+        if ManagedPreferences.launchAtLogin == nil {
+            Toggle(isOn: $startAtLogin) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start Peek at login")
+                    Text("Peek only answers agent requests while it is running.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .fixedSize(horizontal: false, vertical: true)
+            .onChange(of: startAtLogin) { _, newValue in
+                app.setLaunchAtLogin(newValue)
+            }
+        }
     }
 
     @ViewBuilder

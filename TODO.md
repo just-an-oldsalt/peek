@@ -18,6 +18,7 @@ Status as of 2026-05-20. **1.0 release candidate.** Agent path end-to-end + trus
 | 10 | ✅ done | Claude Desktop support via stdio bridge — pinned `mcp-remote@0.1.38` snippet in Settings |
 | 11 | ✅ done (1.1) | Display enumeration + per-monitor capture (`list_displays`, `capture_display`, per-display trust gate) |
 | 12 | ▢ investigate | ScreenCaptureKit fails on Firefox windows |
+| 13 | ✅ done (1.2) | Launch at login — `SMAppService.mainApp`, on by default, user-disableable, MDM-pinnable |
 
 ### 1.0 App Store prep landed
 - `PrivacyInfo.xcprivacy` — no data collection, no tracking, UserDefaults declared with reason CA92.1
@@ -233,6 +234,43 @@ Calls already made during scoping. Do not re-litigate without a conversation:
   sandbox. `NSScreen.localizedName` is the stable sandbox-safe key.
 - **Display capture always prompts on first capture (1.1)**, even when policy permits —
   whole-display is higher-surface than per-window.
+
+### #13 ✅ Launch at login
+
+Implemented in `peek/LaunchAtLogin.swift` + `AppState.bootstrapLaunchAtLogin()`, surfaced
+as Settings → MCP → Startup.
+
+- `SMAppService.mainApp` (macOS 13+). Sandbox-safe, no login-item helper target, no extra
+  entitlement.
+- **On by default**, applied exactly once via `applyDefaultIfNeeded()` behind the
+  `launchAtLoginDefaultAppliedV1` UserDefaults flag. One-shot rather than a "default true"
+  read on every start — the latter would silently re-enable itself after the user switched
+  it off, making the toggle useless across a relaunch.
+- On registration failure the flag is left unset so the default retries next launch instead
+  of being quietly lost.
+- Published state is re-read from `SMAppService` after every change and on
+  `refreshPermission()`, so flipping the item in System Settings → General → Login Items
+  behind Peek's back doesn't desync the toggle.
+- MDM `launchAtLogin` pins the toggle **and** suppresses the first-run default, so a managed
+  `false` keeps Peek out of Login Items from the very first launch.
+
+**Test-host guard.** `peekTests` runs with peek.app as its host, so the app's startup path
+executes during `xcodebuild test`. Without a guard, every test run enrols the developer's own
+machine in a login item pointing at the DerivedData build — confirmed by observing exactly
+that in `sfltool dumpbtm`. `LaunchAtLogin.isRunningUnderTests` is checked at the
+`bootstrapLaunchAtLogin()` call site (not inside `applyDefaultIfNeeded`, so the one-shot logic
+stays honestly testable).
+
+**Coverage:** `launchAtLogin` tri-state resolution + the already-applied branch of the default
+are unit-tested. The unset branch calls `SMAppService.register()` for real, so it is verified
+manually, not in unit tests.
+
+**Manual verification (done 2026-08-29, macOS 26.6.2, macOS 27.0 SDK):** first launch sets the
+flag and flips the BTM record to `enabled`; toggling off flips it to `disabled`; relaunching
+leaves it `disabled`. Checked via `sfltool dumpbtm`.
+
+> ⚠️ When testing this by hand, use a real build. Launching a DerivedData build registers a
+> login item pointing into DerivedData, which dangles once that build is deleted.
 
 ### #12 Investigate: SCK fails on Firefox windows
 

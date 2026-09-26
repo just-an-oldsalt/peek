@@ -117,52 +117,24 @@ struct ManagedPolicyTests {
             }
         }
     }
-}
 
-// DisplayApprovalStore mutates UserDefaults.standard under "trustedDisplaysV1".
-// Serialized + save/restore so it doesn't race or pollute the real domain.
-@MainActor
-@Suite(.serialized)
-struct DisplayApprovalStoreTests {
-    private static let key = "trustedDisplaysV1"
-
-    private func withCleanDefaults(_ body: (DisplayApprovalStore) -> Void) {
-        let previous = UserDefaults.standard.data(forKey: Self.key)
-        UserDefaults.standard.removeObject(forKey: Self.key)
-        defer {
-            if let previous { UserDefaults.standard.set(previous, forKey: Self.key) }
-            else { UserDefaults.standard.removeObject(forKey: Self.key) }
-        }
-        body(DisplayApprovalStore())
-    }
-
-    @Test func addAndRevokeRoundTrip() {
-        withCleanDefaults { store in
-            #expect(!store.isAlwaysAllowed(name: "DELL U2720Q"))
-
-            store.allowAlways(name: "DELL U2720Q")
-            #expect(store.isAlwaysAllowed(name: "DELL U2720Q"))
-            // Case-insensitive key.
-            #expect(store.isAlwaysAllowed(name: "dell u2720q"))
-            #expect(store.trusted.count == 1)
-
-            // Persists across a fresh load of the same defaults.
-            let reloaded = DisplayApprovalStore()
-            #expect(reloaded.isAlwaysAllowed(name: "DELL U2720Q"))
-
-            store.revoke(name: "DELL U2720Q")
-            #expect(!store.isAlwaysAllowed(name: "DELL U2720Q"))
-            #expect(store.trusted.isEmpty)
+    // launchAtLogin is tri-state: absent leaves the first-run default in
+    // charge, true/false are policy pins that suppress it.
+    @Test func launchAtLoginAbsentIsUnmanaged() {
+        withTempManagedPlist([:]) {
+            #expect(ManagedPreferences.launchAtLogin == nil)
         }
     }
 
-    @Test func revokeAllClears() {
-        withCleanDefaults { store in
-            store.allowAlways(name: "Built-in Retina Display")
-            store.allowAlways(name: "LG UltraFine")
-            #expect(store.trusted.count == 2)
-            store.revokeAll()
-            #expect(store.trusted.isEmpty)
+    @Test func launchAtLoginManagedTrue() {
+        withTempManagedPlist(["launchAtLogin": true]) {
+            #expect(ManagedPreferences.launchAtLogin == true)
+        }
+    }
+
+    @Test func launchAtLoginManagedFalse() {
+        withTempManagedPlist(["launchAtLogin": false]) {
+            #expect(ManagedPreferences.launchAtLogin == false)
         }
     }
 }

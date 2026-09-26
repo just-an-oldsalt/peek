@@ -12,12 +12,22 @@ This is the source-of-truth doc for picking up Peek work in any session.
 
 Sibling to **Niacin** (`~/Documents/GIT/niacin`). Same architectural shape, different OS primitive (ScreenCaptureKit instead of `IOPMAssertion`).
 
-## Status — 2026-06-07: 1.1 in development
+## Status — 2026-08-29: 1.2 in development
 
-**1.0 (build 4) shipped — accepted to the App Store.** 1.1 adds multi-display capture
-(`list_displays` / `capture_display` with named monitors + a per-display trust gate),
-the menu-bar capture-flash + icon states, and the live Claude Desktop smoke. See
-`PLAN_1.1.md` for the full plan and `feature/1.1` for the work.
+**1.1 shipped.** It added multi-display capture (`list_displays` / `capture_display` with
+named monitors + a per-display trust gate), the menu-bar capture-flash + icon states, and
+the live Claude Desktop smoke. See `PLAN_1.1.md` for that plan.
+
+**1.2 (build 7) is in progress, unreleased.** It adds launch-at-login via
+`SMAppService.mainApp` — on by default (applied once on first run), user-disableable from
+Settings → MCP → Startup, and MDM-pinnable via the `launchAtLogin` key. See TODO #13.
+
+macOS 27 "Golden Gate" (September 2026) readiness: builds warning-free against the
+macOS 27.0 SDK with Xcode 27 beta 6 and all tests pass, but that was verified *on* macOS
+26.6 — runtime behaviour on a real Golden Gate machine, above all the TCC screen-recording
+flow, is still unverified. The Xcode 27 toolchain also emits 8 `#IsolatedConformances`
+warnings in `peekTests` (zero on Xcode 26.6) that become errors under the Swift 6 language
+mode.
 
 > ⚠️ History note: the accepted build's commit `95c4366` (App Review 5.1.1 neutral-wording
 > fix + build→4) was never pushed to origin; PR #3 merged only up to build 2. `feature/1.1`
