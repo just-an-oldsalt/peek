@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import ScreenCaptureKit
 
-struct WindowInfo: Sendable, Hashable {
+nonisolated struct WindowInfo: Sendable, Hashable {
     let id: CGWindowID
     let app: String
     let bundleID: String?

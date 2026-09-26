@@ -96,7 +96,7 @@ struct ManagedPreferences {
 
     // MARK: - Per-app trust evaluation
 
-    enum AppPolicyDecision: Equatable {
+    nonisolated enum AppPolicyDecision: Equatable {
         case allowed         // explicitly OK by policy — skip user prompt
         case denied(String)  // blocked by policy with a human-readable reason
         case userControlled  // policy says nothing; ask the user / cache
