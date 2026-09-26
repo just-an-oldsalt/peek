@@ -28,7 +28,6 @@ Peek keeps a small amount of state inside its own sandboxed container on your Ma
 | List of bundle IDs you have tapped **Always Allow** for | App's `UserDefaults` (`trustedAppsV1` key) | So Peek can skip the approval prompt for apps you have already trusted. View and revoke from Settings → Trusted Apps. |
 | Names of displays you have tapped **Always Allow** for | App's `UserDefaults` (`trustedDisplaysV1` key) | Monitor names only (e.g. "Built-in Retina Display") — no pixels, no screen contents. View and revoke from Settings → Trusted Displays. |
 | `mcpServerEnabled` toggle state | App's `UserDefaults` | Remembers whether you want the local MCP server running. |
-| One-shot flag that the launch-at-login default has been applied | App's `UserDefaults` (`launchAtLoginDefaultAppliedV1` key) | So that switching the login item off stays off across restarts. |
 
 That's the complete list. There is no on-disk persistence of captured screenshots, no audit database, no log of which apps an agent has captured.
 

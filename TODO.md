@@ -18,7 +18,7 @@ Status as of 2026-05-20. **1.0 release candidate.** Agent path end-to-end + trus
 | 10 | ✅ done | Claude Desktop support via stdio bridge — pinned `mcp-remote@0.1.38` snippet in Settings |
 | 11 | ✅ done (1.1) | Display enumeration + per-monitor capture (`list_displays`, `capture_display`, per-display trust gate) |
 | 12 | ▢ investigate | ScreenCaptureKit fails on Firefox windows |
-| 13 | ✅ done (1.2) | Launch at login — `SMAppService.mainApp`, on by default, user-disableable, MDM-pinnable |
+| 13 | ✅ done (1.3) | Launch at login — `SMAppService.mainApp`, opt-in (never self-registers), MDM-pinnable |
 
 ### 1.0 App Store prep landed
 - `PrivacyInfo.xcprivacy` — no data collection, no tracking, UserDefaults declared with reason CA92.1
@@ -242,32 +242,31 @@ as Settings → MCP → Startup.
 
 - `SMAppService.mainApp` (macOS 13+). Sandbox-safe, no login-item helper target, no extra
   entitlement.
-- **On by default**, applied exactly once via `applyDefaultIfNeeded()` behind the
-  `launchAtLoginDefaultAppliedV1` UserDefaults flag. One-shot rather than a "default true"
-  read on every start — the latter would silently re-enable itself after the user switched
-  it off, making the toggle useless across a relaunch.
-- On registration failure the flag is left unset so the default retries next launch instead
-  of being quietly lost.
+- **Opt-in only.** Peek never registers itself: the Welcome window has an unticked
+  "Start Peek at login" checkbox and Settings → MCP → Startup has the toggle. 1.2 build 7
+  registered on first run (a one-shot `applyDefaultIfNeeded()`) and App Review rejected it
+  under 2.4.5(iii) — auto-launch without user consent. That default and its
+  `launchAtLoginDefaultAppliedV1` flag are gone; 1.3 resubmits the opt-in version.
 - Published state is re-read from `SMAppService` after every change and on
   `refreshPermission()`, so flipping the item in System Settings → General → Login Items
   behind Peek's back doesn't desync the toggle.
-- MDM `launchAtLogin` pins the toggle **and** suppresses the first-run default, so a managed
-  `false` keeps Peek out of Login Items from the very first launch.
+- MDM `launchAtLogin` pins the toggle and is enforced at launch — the device owner's
+  consent. It's the only startup-time login-item change Peek makes.
 
 **Test-host guard.** `peekTests` runs with peek.app as its host, so the app's startup path
 executes during `xcodebuild test`. Without a guard, every test run enrols the developer's own
 machine in a login item pointing at the DerivedData build — confirmed by observing exactly
 that in `sfltool dumpbtm`. `LaunchAtLogin.isRunningUnderTests` is checked at the
-`bootstrapLaunchAtLogin()` call site (not inside `applyDefaultIfNeeded`, so the one-shot logic
-stays honestly testable).
+`bootstrapLaunchAtLogin()` call site, so MDM enforcement never touches a developer's login
+items during `xcodebuild test`.
 
-**Coverage:** `launchAtLogin` tri-state resolution + the already-applied branch of the default
-are unit-tested. The unset branch calls `SMAppService.register()` for real, so it is verified
-manually, not in unit tests.
+**Coverage:** `launchAtLogin` tri-state MDM resolution is unit-tested. Registration calls
+`SMAppService.register()` for real, so it is verified manually, not in unit tests.
 
-**Manual verification (done 2026-08-29, macOS 26.6.2, macOS 27.0 SDK):** first launch sets the
-flag and flips the BTM record to `enabled`; toggling off flips it to `disabled`; relaunching
-leaves it `disabled`. Checked via `sfltool dumpbtm`.
+**Manual verification (2026-08-29, macOS 26.6.2) was of the rejected on-by-default build.**
+Still to do for 1.3 on macOS 27, with a real (non-DerivedData) build and `sfltool dumpbtm`:
+first launch leaves no BTM record; ticking the box flips it to `enabled`; unticking to
+`disabled`; relaunch changes nothing.
 
 > ⚠️ When testing this by hand, use a real build. Launching a DerivedData build registers a
 > login item pointing into DerivedData, which dangles once that build is deleted.

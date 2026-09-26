@@ -8,10 +8,10 @@ Download the latest `peek-X.Y.dmg` from [GitHub Releases](https://github.com/jus
 
 You'll see a viewfinder icon (⌖) appear in the menu bar. If the icon has a slash through it, Peek is waiting on Screen Recording permission — see step 2.
 
-Peek adds itself to your login items the first time it runs, so it's already
-listening when an agent asks for a capture after a reboot. Turn it off any time
-in Settings → MCP → Startup (or System Settings → General → Login Items) — once
-you switch it off it stays off.
+Peek only answers agent requests while it's running. To have it listening after
+a reboot, tick **Start Peek at login** in the Welcome window or in Settings →
+MCP → Startup. It's off until you turn it on; switch it off again there or in
+System Settings → General → Login Items.
 
 ## 2. Grant Screen Recording
 
