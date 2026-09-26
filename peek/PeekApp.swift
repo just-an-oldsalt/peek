@@ -368,12 +368,15 @@ final class AppState: ObservableObject {
         }
         do {
             let windows = try await WindowCapture.listWindows()
-            var seen = Set<pid_t>()
-            var grouped: [AppEntry] = []
-            for w in windows where seen.insert(w.pid).inserted {
-                grouped.append(.init(id: w.pid, name: w.app, windowID: w.id, title: w.title))
+            // One entry per app, pointing at its best window (see
+            // `WindowInfo.isPreferred`) — the first one is often a placeholder.
+            var best: [pid_t: WindowInfo] = [:]
+            for w in windows where best[w.pid].map({ w.isPreferred(over: $0) }) ?? true {
+                best[w.pid] = w
             }
-            apps = grouped.sorted {
+            apps = best.values.map {
+                AppEntry(id: $0.pid, name: $0.app, windowID: $0.id, title: $0.title)
+            }.sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
             status = apps.isEmpty ? "No captureable windows" : nil

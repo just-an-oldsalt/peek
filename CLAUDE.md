@@ -22,12 +22,16 @@ the live Claude Desktop smoke. See `PLAN_1.1.md` for that plan.
 `SMAppService.mainApp` — on by default (applied once on first run), user-disableable from
 Settings → MCP → Startup, and MDM-pinnable via the `launchAtLogin` key. See TODO #13.
 
-macOS 27 "Golden Gate" (September 2026) readiness: builds warning-free against the
-macOS 27.0 SDK with Xcode 27 beta 6 and all tests pass, but that was verified *on* macOS
-26.6 — runtime behaviour on a real Golden Gate machine, above all the TCC screen-recording
-flow, is still unverified. The Xcode 27 toolchain also emits 8 `#IsolatedConformances`
-warnings in `peekTests` (zero on Xcode 26.6) that become errors under the Swift 6 language
-mode.
+macOS 27 "Golden Gate" (September 2026) readiness: as of 2026-09-26 the app and
+`peekTests` build with zero warnings on Xcode 27.0 (27A266a) and all tests pass, run on
+macOS 27.0. The former `#IsolatedConformances` test warnings were fixed by marking
+`WindowInfo`, `DisplayInfo` and `ManagedPreferences.AppPolicyDecision` `nonisolated`
+(the target defaults to MainActor isolation). Runtime verified on macOS 27.0 the same
+day (Debug build): TCC grant → relaunch → `list_windows` / `list_displays` /
+`capture_app` over MCP all work. On 27.0, `SCShareableContent` also returns dozens of
+untitled system placeholder windows (64×64 service windows, parked 500×500 per-app
+windows, display-wide strips) — `WindowCapture.isSystemPlaceholder` drops them and
+`WindowInfo.isPreferred` ranks the per-app pick. Whether 26.x does the same is unknown.
 
 > ⚠️ History note: the accepted build's commit `95c4366` (App Review 5.1.1 neutral-wording
 > fix + build→4) was never pushed to origin; PR #3 merged only up to build 2. `feature/1.1`

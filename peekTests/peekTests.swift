@@ -56,7 +56,8 @@ import ScreenCaptureKit
         bundleID: "com.apple.calculator",
         title: "Calculator",
         bounds: CGRect(x: 0, y: 0, width: 320, height: 480),
-        pid: 1234
+        pid: 1234,
+        isOnScreen: true
     )
     let b = a
     #expect(a == b)
@@ -171,4 +172,36 @@ private func withTempManagedPlist(_ values: [String: Any], body: () -> Void) {
         try? FileManager.default.removeItem(at: dir)
     }
     body()
+}
+
+// Frames observed on macOS 27.0 with a single 2560×1440 display.
+@Test func systemPlaceholderWindowsAreDropped() {
+    let displays = [CGRect(x: 0, y: 0, width: 2560, height: 1440)]
+    func junk(_ title: String, _ frame: CGRect, onScreen: Bool = false) -> Bool {
+        WindowCapture.isSystemPlaceholder(title: title, frame: frame, isOnScreen: onScreen, displays: displays)
+    }
+    // Dropped.
+    #expect(junk("", CGRect(x: 0, y: 940, width: 500, height: 500)))     // parked per-app placeholder
+    #expect(junk("", CGRect(x: 0, y: 1376, width: 64, height: 64)))     // CursorUIViewService
+    #expect(junk("", CGRect(x: 1150, y: 629, width: 64, height: 64), onScreen: true))
+    #expect(junk("", CGRect(x: 0, y: 0, width: 2560, height: 68)))      // Firefox strip
+    #expect(junk("", CGRect(x: 0, y: -44, width: 2560, height: 44)))    // Zed strip above the display
+    #expect(junk("", CGRect(x: 0, y: 0, width: 2560, height: 30), onScreen: true))
+    // Kept.
+    #expect(!junk("", CGRect(x: 2236, y: 348, width: 586, height: 476)))  // hidden Music mini player
+    #expect(!junk("", CGRect(x: 1192, y: 43, width: 1341, height: 1124))) // hidden Photos
+    #expect(!junk("", CGRect(x: 0, y: 940, width: 500, height: 500), onScreen: true))
+    #expect(!junk("Desktop", CGRect(x: 0, y: 940, width: 500, height: 500)))
+    #expect(!junk("", CGRect(x: 99, y: 111, width: 1084, height: 139), onScreen: true)) // Chrome bar
+}
+
+@Test func windowRankingPrefersVisibleTitledLarge() {
+    func w(_ title: String, _ size: CGFloat, onScreen: Bool) -> WindowInfo {
+        WindowInfo(id: 1, app: "App", bundleID: nil, title: title,
+                   bounds: CGRect(x: 0, y: 0, width: size, height: size), pid: 1, isOnScreen: onScreen)
+    }
+    #expect(w("", 100, onScreen: true).isPreferred(over: w("Doc", 900, onScreen: false)))
+    #expect(w("Doc", 100, onScreen: true).isPreferred(over: w("", 900, onScreen: true)))
+    #expect(w("Doc", 900, onScreen: true).isPreferred(over: w("Other", 100, onScreen: true)))
+    #expect(!w("Doc", 500, onScreen: true).isPreferred(over: w("Other", 500, onScreen: true)))
 }

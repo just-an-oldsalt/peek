@@ -9,6 +9,16 @@ nonisolated struct WindowInfo: Sendable, Hashable {
     let title: String
     let bounds: CGRect
     let pid: pid_t
+    let isOnScreen: Bool
+
+    /// Ranking for "pick one window of this app": on-screen before off-screen,
+    /// titled before untitled, then larger before smaller. Ties keep the
+    /// earlier (ScreenCaptureKit) order.
+    func isPreferred(over other: WindowInfo) -> Bool {
+        if isOnScreen != other.isOnScreen { return isOnScreen }
+        if title.isEmpty != other.title.isEmpty { return !title.isEmpty }
+        return bounds.width * bounds.height > other.bounds.width * other.bounds.height
+    }
 }
 
 enum WindowCaptureError: Error, CustomStringConvertible {
@@ -61,8 +71,9 @@ enum WindowCaptureError: Error, CustomStringConvertible {
 enum WindowCapture {
     static func listWindows(app: String? = nil) async throws -> [WindowInfo] {
         let content = try await fetchContent()
+        let displays = content.displays.map(\.frame)
         return content.windows
-            .filter { isCaptureableWindow($0, matching: app) }
+            .filter { isCaptureableWindow($0, matching: app, displays: displays) }
             .map(makeWindowInfo)
     }
 
@@ -76,14 +87,11 @@ enum WindowCapture {
         return makeWindowInfo(window)
     }
 
-    /// Resolve the frontmost captureable window matching `name` without
+    /// Resolve the best captureable window matching `name` without
     /// capturing — used to fetch the bundle ID before the approval gate.
     static func resolveApp(name: String) async throws -> WindowInfo {
         let content = try await fetchContent()
-        guard let frontmost = content.windows.first(where: { isCaptureableWindow($0, matching: name) }) else {
-            throw WindowCaptureError.appNotRunning(name)
-        }
-        return makeWindowInfo(frontmost)
+        return makeWindowInfo(try bestWindow(in: content, matching: name))
     }
 
     static func captureWindow(id: CGWindowID) async throws -> Data {
@@ -96,10 +104,7 @@ enum WindowCapture {
 
     static func captureApp(name: String) async throws -> Data {
         let content = try await fetchContent()
-        guard let frontmost = content.windows.first(where: { isCaptureableWindow($0, matching: name) }) else {
-            throw WindowCaptureError.appNotRunning(name)
-        }
-        return try await capture(window: frontmost)
+        return try await capture(window: try bestWindow(in: content, matching: name))
     }
 
     // MARK: - Private
@@ -117,18 +122,48 @@ enum WindowCapture {
         }
     }
 
-    private static func isCaptureableWindow(_ window: SCWindow, matching app: String?) -> Bool {
+    /// The app's window to use for `capture_app` and the click-to-clipboard
+    /// menu. `SCShareableContent` order isn't "frontmost", and the first match
+    /// is often a system placeholder, so rank instead of taking `.first`.
+    private static func bestWindow(in content: SCShareableContent, matching name: String) throws -> SCWindow {
+        let displays = content.displays.map(\.frame)
+        var best: (window: SCWindow, info: WindowInfo)?
+        for window in content.windows where isCaptureableWindow(window, matching: name, displays: displays) {
+            let info = makeWindowInfo(window)
+            if best.map({ info.isPreferred(over: $0.info) }) ?? true {
+                best = (window, info)
+            }
+        }
+        guard let best else { throw WindowCaptureError.appNotRunning(name) }
+        return best.window
+    }
+
+    /// Untitled layer-0 windows that exist for system bookkeeping rather than
+    /// content (observed on macOS 27.0: dozens per session). None of them is
+    /// worth handing to an agent:
+    /// - tiny (≤ 64×64) cursor / drag / text-input service windows;
+    /// - display-wide strips under 100pt tall — menu-bar tracking shadows,
+    ///   sitting at or just above a display's top edge;
+    /// - off-screen windows parked flush in a display's bottom-left corner
+    ///   (the per-app 500×500 placeholders).
+    /// Hidden or minimised real windows keep their last frame, so an untitled
+    /// one (Photos, the Music mini player) still survives.
+    nonisolated static func isSystemPlaceholder(title: String, frame: CGRect, isOnScreen: Bool, displays: [CGRect]) -> Bool {
+        guard title.isEmpty else { return false }
+        if frame.width <= 64, frame.height <= 64 { return true }
+        if frame.height < 100, displays.contains(where: { frame.width >= $0.width }) { return true }
+        if !isOnScreen, displays.contains(where: { frame.minX == $0.minX && frame.maxY == $0.maxY }) {
+            return true
+        }
+        return false
+    }
+
+    private static func isCaptureableWindow(_ window: SCWindow, matching app: String?, displays: [CGRect]) -> Bool {
         guard let owning = window.owningApplication else { return false }
         guard window.windowLayer == 0 else { return false }
         guard window.frame.width > 0, window.frame.height > 0 else { return false }
-        // Drop the empty-titled menu-bar tracking shadows that the system
-        // attaches to the active app (full screen width, flush to top, height
-        // ≤ menu bar). They report windowLayer 0 and would otherwise z-order
-        // ahead of the real window in capture_app.
-        let title = window.title ?? ""
-        if title.isEmpty,
-           window.frame.minY == 0,
-           window.frame.height < 50 {
+        if isSystemPlaceholder(title: window.title ?? "", frame: window.frame,
+                               isOnScreen: window.isOnScreen, displays: displays) {
             return false
         }
         guard let app, !app.isEmpty else { return true }
@@ -175,7 +210,8 @@ enum WindowCapture {
             bundleID: owning?.bundleIdentifier,
             title: window.title ?? "",
             bounds: window.frame,
-            pid: owning.map { $0.processID } ?? 0
+            pid: owning.map { $0.processID } ?? 0,
+            isOnScreen: window.isOnScreen
         )
     }
 }
