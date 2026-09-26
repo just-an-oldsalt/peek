@@ -157,7 +157,7 @@ final class PeekMCPDelegate: MCPDelegate {
             }
         }.map { w -> WindowInfo in
             redact
-                ? WindowInfo(id: w.id, app: w.app, bundleID: w.bundleID, title: "", bounds: w.bounds, pid: w.pid)
+                ? WindowInfo(id: w.id, app: w.app, bundleID: w.bundleID, title: "", bounds: w.bounds, pid: w.pid, isOnScreen: w.isOnScreen)
                 : w
         }
 

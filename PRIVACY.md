@@ -1,6 +1,6 @@
 # Peek — Privacy Policy
 
-_Last updated: 2026-05-20_
+_Last updated: 2026-08-29_
 
 Peek is a macOS menu bar utility that lets you, the user, hand captureable window pixels to AI agents you have already configured on your own machine. Peek runs entirely on your device. This page describes — exhaustively — what data it touches and what it never does.
 
@@ -25,7 +25,8 @@ Peek keeps a small amount of state inside its own sandboxed container on your Ma
 | What | Where | Why |
 |---|---|---|
 | Bearer token for the local MCP server | macOS Keychain (`com.oldsalt.peek.mcp` service) | Authenticates AI clients you have configured. You can rotate or revoke from Settings → MCP. |
-| List of bundle IDs you have tapped **Always Allow** for | App's `UserDefaults` (`trustedApps` key) | So Peek can skip the approval prompt for apps you have already trusted. View and revoke from Settings → Trusted Apps. |
+| List of bundle IDs you have tapped **Always Allow** for | App's `UserDefaults` (`trustedAppsV1` key) | So Peek can skip the approval prompt for apps you have already trusted. View and revoke from Settings → Trusted Apps. |
+| Names of displays you have tapped **Always Allow** for | App's `UserDefaults` (`trustedDisplaysV1` key) | Monitor names only (e.g. "Built-in Retina Display") — no pixels, no screen contents. View and revoke from Settings → Trusted Displays. |
 | `mcpServerEnabled` toggle state | App's `UserDefaults` | Remembers whether you want the local MCP server running. |
 
 That's the complete list. There is no on-disk persistence of captured screenshots, no audit database, no log of which apps an agent has captured.
@@ -33,6 +34,8 @@ That's the complete list. There is no on-disk persistence of captured screenshot
 ## What Peek reads when capturing
 
 When an AI agent calls `capture_window` or `capture_app` (and you grant the per-app approval), Peek asks ScreenCaptureKit to composite that window's pixels into a PNG. The PNG is returned to the requesting AI client over the loopback HTTP listener and is not retained by Peek.
+
+When an agent calls `capture_display`, the same applies to a whole monitor. A display is a wider surface than a single window — notifications, password panels, and anything else parked on that screen are included — so Peek always asks for your approval the first time each monitor is captured, even where an MDM policy already permits it.
 
 Peek does **not**:
 

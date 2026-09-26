@@ -24,7 +24,7 @@ You          Agent                   Peek                  ScreenCaptureKit
 - **Two-gate trust model**: bearer token (proves the request came from a paired client) + first-time per-app approval (proves *you* consent to capturing that specific app). Manage trusted apps from Settings.
 - **No Accessibility entitlement**. ScreenCaptureKit composites occluded window pixels off-screen; Peek never raises, moves, or interacts with another app's windows.
 - **App Sandbox on, hardened runtime on.** One non-default entitlement: `com.apple.security.network.server` for the loopback listener.
-- **MDM-manageable** via `/Library/Managed Preferences/com.oldsalt.peek.plist` — `enabled`, `mcpServerEnabled`, `allowedApps`, `deniedApps`, `redactWindowTitles`, `disableQuit`.
+- **MDM-manageable** via `/Library/Managed Preferences/com.oldsalt.peek.plist` — `enabled`, `mcpServerEnabled`, `allowedApps`, `deniedApps`, `redactWindowTitles`, `disableQuit`, `launchAtLogin`.
 - **Both human and agent paths.** Click the menu bar icon → pick an app → its frontmost window lands on your clipboard as a PNG. Or wire it up to Claude Code / Claude Desktop / Cursor for the agent flow.
 
 ## MCP surface

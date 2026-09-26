@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import ScreenCaptureKit
 
-struct DisplayInfo: Sendable, Hashable {
+nonisolated struct DisplayInfo: Sendable, Hashable {
     let id: CGDirectDisplayID
     let name: String
     let frame: CGRect
@@ -69,7 +69,7 @@ enum DisplayCapture {
                 onScreenWindowsOnly: false
             )
         } catch {
-            throw WindowCaptureError.permissionDenied
+            throw WindowCaptureError.fromShareableContent(error, granted: ScreenRecordingPermission.isGranted)
         }
     }
 

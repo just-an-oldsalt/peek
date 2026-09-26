@@ -106,6 +106,17 @@ MCP,AI,agent,Claude,Cursor,screenshot,window,capture,utility,developer,menubar,L
 
 ### What's New (release notes, 4000 char max)
 
+1.3:
+
+```
+• Start Peek at login — an optional setting (off unless you turn it on) so Peek is ready for your agent after a restart. Find it in the welcome window or Settings → MCP → Startup.
+• Ready for macOS 27.
+• After granting Screen Recording access, a new Relaunch Peek button applies it straight away.
+• Captures pick the right window more reliably, and capture errors now say what actually went wrong.
+```
+
+1.0:
+
 ```
 Welcome to Peek 1.0 — the first public release.
 

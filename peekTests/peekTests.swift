@@ -1,6 +1,7 @@
 import Testing
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 @testable import peek
 
 @Test func windowCaptureErrorDescriptions() {
@@ -17,6 +18,23 @@ import Foundation
         WindowCaptureError.ambiguousDisplay(["Studio Display", "Studio Display (2)"]).description
             == "Ambiguous display name — matches Studio Display, Studio Display (2). Capture by id instead."
     )
+}
+
+@Test func shareableContentErrorMapping() {
+    let other = NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "boom"])
+    let declined = SCStreamError(.userDeclined)
+
+    // Without consent, any failure is a permission problem.
+    guard case .permissionDenied = WindowCaptureError.fromShareableContent(other, granted: false) else {
+        Issue.record("expected permissionDenied when not granted"); return
+    }
+    // An explicit TCC refusal is a permission problem even if preflight said yes.
+    guard case .permissionDenied = WindowCaptureError.fromShareableContent(declined, granted: true) else {
+        Issue.record("expected permissionDenied for userDeclined"); return
+    }
+    // Anything else surfaces the real error.
+    let mapped = WindowCaptureError.fromShareableContent(other, granted: true)
+    #expect(mapped.description == "Capture failed: boom")
 }
 
 @Test func displayInfoIsValueType() {
@@ -38,7 +56,8 @@ import Foundation
         bundleID: "com.apple.calculator",
         title: "Calculator",
         bounds: CGRect(x: 0, y: 0, width: 320, height: 480),
-        pid: 1234
+        pid: 1234,
+        isOnScreen: true
     )
     let b = a
     #expect(a == b)
@@ -117,52 +136,24 @@ struct ManagedPolicyTests {
             }
         }
     }
-}
 
-// DisplayApprovalStore mutates UserDefaults.standard under "trustedDisplaysV1".
-// Serialized + save/restore so it doesn't race or pollute the real domain.
-@MainActor
-@Suite(.serialized)
-struct DisplayApprovalStoreTests {
-    private static let key = "trustedDisplaysV1"
-
-    private func withCleanDefaults(_ body: (DisplayApprovalStore) -> Void) {
-        let previous = UserDefaults.standard.data(forKey: Self.key)
-        UserDefaults.standard.removeObject(forKey: Self.key)
-        defer {
-            if let previous { UserDefaults.standard.set(previous, forKey: Self.key) }
-            else { UserDefaults.standard.removeObject(forKey: Self.key) }
-        }
-        body(DisplayApprovalStore())
-    }
-
-    @Test func addAndRevokeRoundTrip() {
-        withCleanDefaults { store in
-            #expect(!store.isAlwaysAllowed(name: "DELL U2720Q"))
-
-            store.allowAlways(name: "DELL U2720Q")
-            #expect(store.isAlwaysAllowed(name: "DELL U2720Q"))
-            // Case-insensitive key.
-            #expect(store.isAlwaysAllowed(name: "dell u2720q"))
-            #expect(store.trusted.count == 1)
-
-            // Persists across a fresh load of the same defaults.
-            let reloaded = DisplayApprovalStore()
-            #expect(reloaded.isAlwaysAllowed(name: "DELL U2720Q"))
-
-            store.revoke(name: "DELL U2720Q")
-            #expect(!store.isAlwaysAllowed(name: "DELL U2720Q"))
-            #expect(store.trusted.isEmpty)
+    // launchAtLogin is tri-state: absent leaves the first-run default in
+    // charge, true/false are policy pins that suppress it.
+    @Test func launchAtLoginAbsentIsUnmanaged() {
+        withTempManagedPlist([:]) {
+            #expect(ManagedPreferences.launchAtLogin == nil)
         }
     }
 
-    @Test func revokeAllClears() {
-        withCleanDefaults { store in
-            store.allowAlways(name: "Built-in Retina Display")
-            store.allowAlways(name: "LG UltraFine")
-            #expect(store.trusted.count == 2)
-            store.revokeAll()
-            #expect(store.trusted.isEmpty)
+    @Test func launchAtLoginManagedTrue() {
+        withTempManagedPlist(["launchAtLogin": true]) {
+            #expect(ManagedPreferences.launchAtLogin == true)
+        }
+    }
+
+    @Test func launchAtLoginManagedFalse() {
+        withTempManagedPlist(["launchAtLogin": false]) {
+            #expect(ManagedPreferences.launchAtLogin == false)
         }
     }
 }
@@ -181,4 +172,36 @@ private func withTempManagedPlist(_ values: [String: Any], body: () -> Void) {
         try? FileManager.default.removeItem(at: dir)
     }
     body()
+}
+
+// Frames observed on macOS 27.0 with a single 2560×1440 display.
+@Test func systemPlaceholderWindowsAreDropped() {
+    let displays = [CGRect(x: 0, y: 0, width: 2560, height: 1440)]
+    func junk(_ title: String, _ frame: CGRect, onScreen: Bool = false) -> Bool {
+        WindowCapture.isSystemPlaceholder(title: title, frame: frame, isOnScreen: onScreen, displays: displays)
+    }
+    // Dropped.
+    #expect(junk("", CGRect(x: 0, y: 940, width: 500, height: 500)))     // parked per-app placeholder
+    #expect(junk("", CGRect(x: 0, y: 1376, width: 64, height: 64)))     // CursorUIViewService
+    #expect(junk("", CGRect(x: 1150, y: 629, width: 64, height: 64), onScreen: true))
+    #expect(junk("", CGRect(x: 0, y: 0, width: 2560, height: 68)))      // Firefox strip
+    #expect(junk("", CGRect(x: 0, y: -44, width: 2560, height: 44)))    // Zed strip above the display
+    #expect(junk("", CGRect(x: 0, y: 0, width: 2560, height: 30), onScreen: true))
+    // Kept.
+    #expect(!junk("", CGRect(x: 2236, y: 348, width: 586, height: 476)))  // hidden Music mini player
+    #expect(!junk("", CGRect(x: 1192, y: 43, width: 1341, height: 1124))) // hidden Photos
+    #expect(!junk("", CGRect(x: 0, y: 940, width: 500, height: 500), onScreen: true))
+    #expect(!junk("Desktop", CGRect(x: 0, y: 940, width: 500, height: 500)))
+    #expect(!junk("", CGRect(x: 99, y: 111, width: 1084, height: 139), onScreen: true)) // Chrome bar
+}
+
+@Test func windowRankingPrefersVisibleTitledLarge() {
+    func w(_ title: String, _ size: CGFloat, onScreen: Bool) -> WindowInfo {
+        WindowInfo(id: 1, app: "App", bundleID: nil, title: title,
+                   bounds: CGRect(x: 0, y: 0, width: size, height: size), pid: 1, isOnScreen: onScreen)
+    }
+    #expect(w("", 100, onScreen: true).isPreferred(over: w("Doc", 900, onScreen: false)))
+    #expect(w("Doc", 100, onScreen: true).isPreferred(over: w("", 900, onScreen: true)))
+    #expect(w("Doc", 900, onScreen: true).isPreferred(over: w("Other", 100, onScreen: true)))
+    #expect(!w("Doc", 500, onScreen: true).isPreferred(over: w("Other", 500, onScreen: true)))
 }

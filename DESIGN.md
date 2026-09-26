@@ -106,6 +106,7 @@ Standard location: `/Library/Managed Preferences/com.oldsalt.peek.plist`. Keys p
 | `allowScreenCapture` | Bool | *(unset)* | Gates `peek.capture_display`. **Tri-state:** unset → user-controlled (per-display approval prompt decides); `true` → capability enabled, prompt still fires on first capture; `false` → hard policy denial. A missing key is *not* a denial — only an explicit managed `false` blocks it. |
 | `redactWindowTitles` | Bool | `false` | Strip window titles from `list_windows` output (some titles leak document names) |
 | `disableQuit` | Bool | `false` | Remove Quit from the menu bar menu |
+| `launchAtLogin` | Bool | unset (user choice, off) | Register Peek as a login item (`SMAppService.mainApp`). **Unmanaged, it is off until the user opts in** (Welcome window tick or Settings → MCP → Startup) — App Review 2.4.5(iii) rejected 1.2 build 7 for registering on first run. A managed value pins the toggle and is enforced at launch; that is the device owner's consent, not Peek's. |
 
 Niacin's `ManagedPreferences.swift` resolver is portable as-is; just swap the bundle ID and the key list.
 

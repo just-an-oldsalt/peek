@@ -12,12 +12,31 @@ This is the source-of-truth doc for picking up Peek work in any session.
 
 Sibling to **Niacin** (`~/Documents/GIT/niacin`). Same architectural shape, different OS primitive (ScreenCaptureKit instead of `IOPMAssertion`).
 
-## Status — 2026-06-07: 1.1 in development
+## Status — 2026-09-26: 1.3 in release prep
 
-**1.0 (build 4) shipped — accepted to the App Store.** 1.1 adds multi-display capture
-(`list_displays` / `capture_display` with named monitors + a per-display trust gate),
-the menu-bar capture-flash + icon states, and the live Claude Desktop smoke. See
-`PLAN_1.1.md` for the full plan and `feature/1.1` for the work.
+**1.1 shipped.** It added multi-display capture (`list_displays` / `capture_display` with
+named monitors + a per-display trust gate), the menu-bar capture-flash + icon states, and
+the live Claude Desktop smoke. See `PLAN_1.1.md` for that plan.
+
+**1.2 was rejected and never shipped.** Build 7 registered a login item on first run;
+App Review rejected it under 2.4.5(iii) (auto-launch without consent).
+
+**1.3 (build 9) is being prepared on `release/1.3`.** It carries the fixed launch-at-login
+(`SMAppService.mainApp`, **opt-in only** — unticked Welcome checkbox + Settings → MCP →
+Startup; MDM-pinnable via `launchAtLogin`; Peek never registers itself, see TODO #13),
+plus macOS 27 support: Relaunch-to-apply for the Screen Recording grant, real SCK errors
+instead of a blanket "permission denied", and filtering of macOS 27 placeholder windows.
+
+macOS 27 "Golden Gate" (September 2026) readiness: as of 2026-09-26 the app and
+`peekTests` build with zero warnings on Xcode 27.0 (27A266a) and all tests pass, run on
+macOS 27.0. The former `#IsolatedConformances` test warnings were fixed by marking
+`WindowInfo`, `DisplayInfo` and `ManagedPreferences.AppPolicyDecision` `nonisolated`
+(the target defaults to MainActor isolation). Runtime verified on macOS 27.0 the same
+day (Debug build): TCC grant → relaunch → `list_windows` / `list_displays` /
+`capture_app` over MCP all work. On 27.0, `SCShareableContent` also returns dozens of
+untitled system placeholder windows (64×64 service windows, parked 500×500 per-app
+windows, display-wide strips) — `WindowCapture.isSystemPlaceholder` drops them and
+`WindowInfo.isPreferred` ranks the per-app pick. Whether 26.x does the same is unknown.
 
 > ⚠️ History note: the accepted build's commit `95c4366` (App Review 5.1.1 neutral-wording
 > fix + build→4) was never pushed to origin; PR #3 merged only up to build 2. `feature/1.1`

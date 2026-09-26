@@ -80,6 +80,14 @@ struct ManagedPreferences {
     // Remove Quit from the menu bar menu.
     static var disableQuit: Bool { bool("disableQuit") ?? false }
 
+    // Whether Peek registers itself as a login item. Unmanaged, this is off
+    // until the user opts in — from the Welcome window tick or Settings → MCP
+    // → Startup. Peek never enrols itself (App Review 2.4.5(iii): a
+    // self-registering login item is auto-launch without user consent).
+    // A managed value is the device owner's decision, so it is enforced at
+    // startup and locks the toggle; the Welcome window hides the tick when set.
+    static var launchAtLogin: Bool? { bool("launchAtLogin") }
+
     // True only if the key is set in a managed plist — drives lock icons
     // on the corresponding Settings controls.
     static func isManaged(key: String) -> Bool {
@@ -88,7 +96,7 @@ struct ManagedPreferences {
 
     // MARK: - Per-app trust evaluation
 
-    enum AppPolicyDecision: Equatable {
+    nonisolated enum AppPolicyDecision: Equatable {
         case allowed         // explicitly OK by policy — skip user prompt
         case denied(String)  // blocked by policy with a human-readable reason
         case userControlled  // policy says nothing; ask the user / cache
