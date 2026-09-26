@@ -12,15 +12,20 @@ This is the source-of-truth doc for picking up Peek work in any session.
 
 Sibling to **Niacin** (`~/Documents/GIT/niacin`). Same architectural shape, different OS primitive (ScreenCaptureKit instead of `IOPMAssertion`).
 
-## Status — 2026-08-29: 1.2 in development
+## Status — 2026-09-26: 1.3 in release prep
 
 **1.1 shipped.** It added multi-display capture (`list_displays` / `capture_display` with
 named monitors + a per-display trust gate), the menu-bar capture-flash + icon states, and
 the live Claude Desktop smoke. See `PLAN_1.1.md` for that plan.
 
-**1.2 (build 7) is in progress, unreleased.** It adds launch-at-login via
-`SMAppService.mainApp` — on by default (applied once on first run), user-disableable from
-Settings → MCP → Startup, and MDM-pinnable via the `launchAtLogin` key. See TODO #13.
+**1.2 was rejected and never shipped.** Build 7 registered a login item on first run;
+App Review rejected it under 2.4.5(iii) (auto-launch without consent).
+
+**1.3 (build 9) is being prepared on `release/1.3`.** It carries the fixed launch-at-login
+(`SMAppService.mainApp`, **opt-in only** — unticked Welcome checkbox + Settings → MCP →
+Startup; MDM-pinnable via `launchAtLogin`; Peek never registers itself, see TODO #13),
+plus macOS 27 support: Relaunch-to-apply for the Screen Recording grant, real SCK errors
+instead of a blanket "permission denied", and filtering of macOS 27 placeholder windows.
 
 macOS 27 "Golden Gate" (September 2026) readiness: as of 2026-09-26 the app and
 `peekTests` build with zero warnings on Xcode 27.0 (27A266a) and all tests pass, run on
