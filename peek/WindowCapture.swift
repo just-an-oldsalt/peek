@@ -41,6 +41,17 @@ enum WindowCaptureError: Error, CustomStringConvertible {
             return reason
         }
     }
+
+    /// Maps a failed `SCShareableContent` fetch. Only a genuine TCC refusal
+    /// becomes `.permissionDenied`; anything else keeps the underlying error so
+    /// an unrelated ScreenCaptureKit failure doesn't masquerade as a
+    /// permissions problem.
+    static func fromShareableContent(_ error: any Error, granted: Bool) -> WindowCaptureError {
+        if !granted || (error as? SCStreamError)?.code == .userDeclined {
+            return .permissionDenied
+        }
+        return .captureFailed(error)
+    }
 }
 
 /// ScreenCaptureKit-backed window enumeration and single-window capture.
@@ -102,7 +113,7 @@ enum WindowCapture {
                 onScreenWindowsOnly: false
             )
         } catch {
-            throw WindowCaptureError.permissionDenied
+            throw WindowCaptureError.fromShareableContent(error, granted: ScreenRecordingPermission.isGranted)
         }
     }
 

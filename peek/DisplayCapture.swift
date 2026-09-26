@@ -69,7 +69,7 @@ enum DisplayCapture {
                 onScreenWindowsOnly: false
             )
         } catch {
-            throw WindowCaptureError.permissionDenied
+            throw WindowCaptureError.fromShareableContent(error, granted: ScreenRecordingPermission.isGranted)
         }
     }
 

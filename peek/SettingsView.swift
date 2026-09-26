@@ -218,10 +218,13 @@ private struct PermissionsTab: View {
                     Button("Open System Settings…") {
                         ScreenRecordingPermission.openSystemSettings()
                     }
-                    Text("After enabling Peek in Screen Recording, quit and relaunch the app for the grant to take effect.")
+                    Text("After enabling Peek in Screen Recording, relaunch Peek for the grant to take effect.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Relaunch Peek") {
+                        app.relaunch()
+                    }
                 }
 
                 Button("Refresh") {

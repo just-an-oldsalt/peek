@@ -409,6 +409,29 @@ final class AppState: ObservableObject {
         ScreenRecordingPermission.openSystemSettings()
     }
 
+    /// `CGPreflightScreenCaptureAccess()` caches its answer for the life of the
+    /// process, so a grant made in System Settings only takes effect after a
+    /// relaunch. Stop the MCP listener first — if the new instance started while
+    /// we still held 11474 it would fall back to the next port and break the
+    /// agent's configured URL.
+    func relaunch() {
+        server.stop()
+        mcpPort = nil
+        mcpRunning = false
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, error in
+            Task { @MainActor in
+                if let error {
+                    self.status = "Relaunch failed: \(error.localizedDescription)"
+                    self.startServerIfPolicyAllows()
+                } else {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
     func capture(_ entry: AppEntry) async {
         do {
             let data = try await WindowCapture.captureWindow(id: entry.windowID)
@@ -446,7 +469,10 @@ private struct MenuContents: View {
                 Button("Continue") {
                     app.requestPermission()
                 }
-                Text("Peek detects the grant automatically — relaunch only if it doesn't.")
+                Text("After enabling Peek in System Settings, relaunch Peek to apply.")
+                Button("Relaunch Peek") {
+                    app.relaunch()
+                }
             } else {
                 Menu("Capture window to clipboard") {
                     if app.apps.isEmpty {
@@ -644,6 +670,13 @@ private struct WelcomeView: View {
                 Button("Continue") {
                     AppState.shared.requestPermission()
                 }
+                Text("Already enabled it? Relaunch Peek to apply.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Relaunch Peek") {
+                    AppState.shared.relaunch()
+                }
+                .controlSize(.small)
             }
         }
     }

@@ -1,6 +1,7 @@
 import Testing
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 @testable import peek
 
 @Test func windowCaptureErrorDescriptions() {
@@ -17,6 +18,23 @@ import Foundation
         WindowCaptureError.ambiguousDisplay(["Studio Display", "Studio Display (2)"]).description
             == "Ambiguous display name — matches Studio Display, Studio Display (2). Capture by id instead."
     )
+}
+
+@Test func shareableContentErrorMapping() {
+    let other = NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "boom"])
+    let declined = SCStreamError(.userDeclined)
+
+    // Without consent, any failure is a permission problem.
+    guard case .permissionDenied = WindowCaptureError.fromShareableContent(other, granted: false) else {
+        Issue.record("expected permissionDenied when not granted"); return
+    }
+    // An explicit TCC refusal is a permission problem even if preflight said yes.
+    guard case .permissionDenied = WindowCaptureError.fromShareableContent(declined, granted: true) else {
+        Issue.record("expected permissionDenied for userDeclined"); return
+    }
+    // Anything else surfaces the real error.
+    let mapped = WindowCaptureError.fromShareableContent(other, granted: true)
+    #expect(mapped.description == "Capture failed: boom")
 }
 
 @Test func displayInfoIsValueType() {
